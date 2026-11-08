@@ -27,8 +27,8 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build Release APK
-        run: ./gradlew assembleUniversalRelease --no-daemon
+      - name: List available build tasks
+        run: ./gradlew tasks --all --no-daemon | grep -i "assemble"
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
