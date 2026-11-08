@@ -27,7 +27,7 @@ android {
         viewBinding = true
         aidl = true
     }
-    namespace = "io.nekohasekai.sagernet"
+    namespace = "com.cloudnode.app"
     packaging {
         jniLibs {
             useLegacyPackaging = true
