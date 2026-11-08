@@ -58,8 +58,11 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
       
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Set Android SDK Environment
+        # GitHub runners already have Android SDK installed, we just set the variables
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
       
       - name: Golang Status
         run: find buildScript libcore/*.sh | xargs cat | sha1sum > golang_status
@@ -86,7 +89,6 @@ jobs:
         run: |
           chmod +x run gradlew
           echo "sdk.dir=${ANDROID_HOME}" > local.properties
-          echo "ndk.dir=${ANDROID_HOME}/ndk/25.2.9519653" >> local.properties
           ./run init action gradle
           ./gradlew app:assembleOssRelease
       
