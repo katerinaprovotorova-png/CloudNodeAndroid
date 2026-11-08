@@ -96,4 +96,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: CloudNode-Release-APK
-          path: app/build/outputs/apk/ossRelease/*.apk
+          path: |
+            app/build/outputs/apk/**/*.apk
