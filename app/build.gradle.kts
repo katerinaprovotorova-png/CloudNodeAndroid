@@ -27,7 +27,15 @@ android {
         viewBinding = true
         aidl = true
     }
+    
+    // Уникальный идентификатор твоего приложения
     namespace = "com.cloudnode.app"
+    
+    // Явно задаем applicationId, чтобы он совпадал с namespace
+    defaultConfig {
+        applicationId = "com.cloudnode.app"
+    }
+    
     packaging {
         jniLibs {
             useLegacyPackaging = true
@@ -36,10 +44,18 @@ android {
     androidResources {
         generateLocaleConfig = true
     }
+
+    // === ДОБАВЛЕНО: Переименование выходного APK файла ===
+    applicationVariants.all {
+        val variant = this
+        outputs.all {
+            val outputImpl = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
+            outputImpl.outputFileName = "CloudNode-${variant.name}.apk"
+        }
+    }
 }
 
 dependencies {
-
     implementation(fileTree("libs"))
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4")
