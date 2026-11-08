@@ -28,10 +28,10 @@ android {
         aidl = true
     }
     
-    // 1. ВОЗВРАЩАЕМ оригинальный namespace, чтобы код мог найти R и BuildConfig
+    // 1. Оставляем оригинальный namespace, чтобы компилятор находил R и BuildConfig
     namespace = "io.nekohasekai.sagernet"
     
-    // 2. ОСТАВЛЯЕМ твой applicationId. Это то, как приложение будет регистрироваться в системе Android
+    // 2. Меняем applicationId, чтобы приложение считалось независимым (твоим)
     defaultConfig {
         applicationId = "com.cloudnode.app"
     }
@@ -43,15 +43,6 @@ android {
     }
     androidResources {
         generateLocaleConfig = true
-    }
-
-    // 3. Переименование выходного APK файла в CloudNode
-    applicationVariants.all {
-        val variant = this
-        outputs.all {
-            val outputImpl = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
-            outputImpl.outputFileName = "CloudNode-${variant.name}.apk"
-        }
     }
 }
 
