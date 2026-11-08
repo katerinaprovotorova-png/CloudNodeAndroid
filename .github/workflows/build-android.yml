@@ -58,10 +58,17 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
       
+      - name: Setup Android SDK & Build Tools
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'build-tools;34.0.0'
+      
       - name: Set Android SDK Environment
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
+          # Добавляем zipalign в системный PATH
+          echo "$ANDROID_HOME/build-tools/34.0.0" >> $GITHUB_PATH
       
       - name: Golang Status
         run: find buildScript libcore/*.sh | xargs cat | sha1sum > golang_status
@@ -96,17 +103,16 @@ jobs:
           # Создаем ключ подписи
           keytool -genkey -v -keystore cloudnode.keystore -alias cloudnode -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=CloudNode, OU=CloudNode, O=CloudNode, L=Moscow, ST=Moscow, C=RU"
           
-          # Находим все APK, удаляем старую подпись, подписываем нашей и выравниваем
+          # Находим все APK, удаляем старую подпись, подписываем нашей (SHA256) и выравниваем
           find app/build/outputs/apk -name "*.apk" -type f | while read apk; do
             echo "Processing: $apk"
             zip -d "$apk" 'META-INF/*.SF' 'META-INF/*.RSA' 'META-INF/*.DSA' 2>/dev/null || true
-            jarsigner -verbose -sigalg SHA1withRSA -digestalg SHA1 -keystore cloudnode.keystore -storepass android -keypass android "$apk" cloudnode
+            jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA256 -keystore cloudnode.keystore -storepass android -keypass android "$apk" cloudnode
             zipalign -f 4 "$apk" "${apk%.apk}-signed.apk"
           done
       
       - name: Rename to CloudNode
         run: |
-          # Создаем папку и переименовываем подписанный файл в финальное имя
           mkdir -p final_apk
           find app/build/outputs/apk -name "*-signed.apk" -type f -exec mv {} final_apk/CloudNode-Release.apk \;
       
