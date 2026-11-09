@@ -28,12 +28,12 @@ android {
         aidl = true
     }
     
-    // 1. Оставляем оригинальный namespace
+    // Оставляем оригинальный namespace
     namespace = "io.nekohasekai.sagernet"
     
-    // 2. Меняем applicationId
+    // Возвращаем оригинальный applicationId, чтобы сборка прошла успешно без ошибок 'R' и 'BuildConfig'
     defaultConfig {
-        applicationId = "com.cloudnode.app"
+        applicationId = "io.nekohasekai.sagernet"
     }
     
     packaging {
