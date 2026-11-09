@@ -96,6 +96,7 @@ jobs:
           chmod +x run gradlew
           echo "sdk.dir=${ANDROID_HOME}" > local.properties
           ./run init action gradle
+          ./gradlew clean 
           ./gradlew app:assembleOssRelease
       
       - name: Sign APK
