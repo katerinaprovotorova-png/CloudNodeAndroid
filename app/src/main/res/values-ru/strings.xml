@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 <string name="abc_search_hint">Введите запрос</string>
+<string name="app_name">NekoBox</string>
 <string name="abc_searchview_description_clear">Удалить запрос</string>
 <string name="abc_searchview_description_search">Поиск</string>
 <string name="abc_searchview_description_submit">Отправить запрос</string>
