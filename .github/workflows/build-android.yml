@@ -69,56 +69,52 @@ jobs:
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
           echo "$ANDROID_HOME/build-tools/34.0.0" >> $GITHUB_PATH
       
-      - name: Golang Status
-        run: find buildScript libcore/*.sh | xargs cat | sha1sum > golang_status
-      
-      - name: Libcore Status
-        run: git ls-files libcore | xargs cat | sha1sum > libcore_status
-      
-      - name: LibCore Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            app/libs/libcore.aar
-          key: ${{ hashFiles('.github/workflows/*', 'golang_status', 'libcore_status') }}
-      
-      - name: Gradle cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.gradle
-          key: gradle-oss-${{ hashFiles('**/*.gradle.kts') }}
-      
-      - name: Clean build
+      - name: Clean Build
         run: |
+          chmod +x gradlew
           ./gradlew clean
       
       - name: Build OSS Release APK
         env:
           BUILD_PLUGIN: none
         run: |
-          chmod +x run gradlew
+          chmod +x run
           echo "sdk.dir=${ANDROID_HOME}" > local.properties
           ./run init action gradle
           ./gradlew app:assembleOssRelease --no-daemon
       
-      - name: Sign APK
+      - name: Sign APK with apksigner
         run: |
+          # 1. Создаем ключ подписи
           keytool -genkey -v -keystore cloudnode.keystore -alias cloudnode -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=CloudNode, OU=CloudNode, O=CloudNode, L=Moscow, ST=Moscow, C=RU"
           
-          find app/build/outputs/apk -name "*.apk" -type f | while read apk; do
-            echo "Processing: $apk"
-            zip -d "$apk" 'META-INF/*.SF' 'META-INF/*.RSA' 'META-INF/*.DSA' 2>/dev/null || true
-            jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA256 -keystore cloudnode.keystore -storepass android -keypass android "$apk" cloudnode
-            zipalign -f 4 "$apk" "${apk%.apk}-signed.apk"
-          done
-      
-      - name: Rename to CloudNode
-        run: |
-          mkdir -p final_apk
-          find app/build/outputs/apk -name "*-signed.apk" -type f -exec mv {} final_apk/CloudNode-Release.apk \;
+          # 2. Находим ИМЕННО универсальный APK (он работает на всех телефонах)
+          APK="app/build/outputs/apk/oss/release/app-oss-release.apk"
+          if [ ! -f "$APK" ]; then
+            # Если универсального нет, берем строго arm64-v8a (для 99% телефонов)
+            APK=$(find app/build/outputs/apk/oss/release -name "*arm64-v8a*.apk" | head -n 1)
+          fi
+          
+          echo "Found APK to sign: $APK"
+          
+          if [ -z "$APK" ] || [ ! -f "$APK" ]; then
+            echo "ERROR: APK not found!"
+            exit 1
+          fi
+
+          # 3. Подписываем через современный apksigner (гарантирует установку на Android 7+)
+          apksigner sign --ks cloudnode.keystore \
+            --ks-key-alias cloudnode \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --min-sdk-version 21 \
+            "$APK"
+          
+          # 4. Переименовываем в финальное имя
+          mv "$APK" "CloudNode-Release.apk"
       
       - name: Upload CloudNode APK
         uses: actions/upload-artifact@v4
         with:
           name: CloudNode-Release-APK
-          path: final_apk/CloudNode-Release.apk
+          path: CloudNode-Release.apk
