@@ -15,31 +15,37 @@ jobs:
         with:
           submodules: recursive
       
-      - name: Golang Status
-        run: find buildScript libcore/*.sh | xargs cat | sha1sum > golang_status
-      
-      - name: Libcore Status
-        run: git ls-files libcore | xargs cat | sha1sum > libcore_status
-      
-      - name: LibCore Cache
-        id: cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            app/libs/libcore.aar
-          key: ${{ hashFiles('.github/workflows/*', 'golang_status', 'libcore_status') }}
-      
       - name: Install Golang
-        if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/setup-go@v5
         with:
           go-version: '1.22'
       
-      - name: Native Build
-        if: steps.cache.outputs.cache-hit != 'true'
+      - name: Native Build (Force Rebuild)
         run: |
           chmod +x run
+          echo "Building libcore from scratch..."
           ./run lib core
+      
+      - name: Verify and Upload libcore.aar
+        run: |
+          echo "=== Checking app/libs directory ==="
+          mkdir -p app/libs
+          ls -la app/libs/
+          if [ -f "app/libs/libcore.aar" ]; then
+            echo "✅ SUCCESS: libcore.aar was created!"
+            ls -lh app/libs/libcore.aar
+          else
+            echo "❌ ERROR: libcore.aar was NOT created!"
+            echo "Listing root directory to debug:"
+            ls -la
+            exit 1
+          fi
+
+      - name: Upload libcore.aar artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libcore-aar
+          path: app/libs/libcore.aar
 
   build:
     name: Build and Sign CloudNode APK
@@ -69,6 +75,23 @@ jobs:
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
           echo "$ANDROID_HOME/build-tools/34.0.0" >> $GITHUB_PATH
       
+      - name: Download libcore.aar from LibCore job
+        uses: actions/download-artifact@v4
+        with:
+          name: libcore-aar
+          path: app/libs/
+      
+      - name: Verify libcore.aar is present
+        run: |
+          echo "=== Verifying libcore.aar in build job ==="
+          ls -la app/libs/
+          if [ -f "app/libs/libcore.aar" ]; then
+            echo "✅ libcore.aar is ready for Gradle!"
+          else
+            echo "❌ libcore.aar is missing!"
+            exit 1
+          fi
+      
       - name: Clean Build
         run: |
           chmod +x gradlew
@@ -85,13 +108,10 @@ jobs:
       
       - name: Sign APK with apksigner
         run: |
-          # 1. Создаем ключ подписи
           keytool -genkey -v -keystore cloudnode.keystore -alias cloudnode -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=CloudNode, OU=CloudNode, O=CloudNode, L=Moscow, ST=Moscow, C=RU"
           
-          # 2. Находим ИМЕННО универсальный APK (он работает на всех телефонах)
           APK="app/build/outputs/apk/oss/release/app-oss-release.apk"
           if [ ! -f "$APK" ]; then
-            # Если универсального нет, берем строго arm64-v8a (для 99% телефонов)
             APK=$(find app/build/outputs/apk/oss/release -name "*arm64-v8a*.apk" | head -n 1)
           fi
           
@@ -102,7 +122,6 @@ jobs:
             exit 1
           fi
 
-          # 3. Подписываем через современный apksigner (гарантирует установку на Android 7+)
           apksigner sign --ks cloudnode.keystore \
             --ks-key-alias cloudnode \
             --ks-pass pass:android \
@@ -110,7 +129,6 @@ jobs:
             --min-sdk-version 21 \
             "$APK"
           
-          # 4. Переименовываем в финальное имя
           mv "$APK" "CloudNode-Release.apk"
       
       - name: Upload CloudNode APK
