@@ -126,14 +126,13 @@ class MainActivity : ThemedActivity(),
         }
     }
 
-    fun refreshNavMenu(clashApi: Boolean) {
+        fun refreshNavMenu(clashApi: Boolean) {
         if (::navigation.isInitialized) {
             navigation.menu.findItem(R.id.nav_traffic)?.isVisible = clashApi
-            navigation.menu.findItem(R.id.nav_tuiguang)?.isVisible = !isPlay
         }
     }
 
-    override fun onNewIntent(intent: Intent) {
+        override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
 
         val uri = intent.data ?: return
@@ -346,11 +345,7 @@ class MainActivity : ThemedActivity(),
             }
 
             R.id.nav_about -> displayFragment(AboutFragment())
-            R.id.nav_tuiguang -> {
-                launchCustomTab("https://neko-box.pages.dev/喵")
-                return false
-            }
-
+            
             else -> return false
         }
         navigation.menu.findItem(id).isChecked = true
