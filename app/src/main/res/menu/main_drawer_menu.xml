@@ -47,6 +47,13 @@
             android:id="@+id/nav_faq"
             android:icon="@drawable/ic_device_data_usage"
             android:title="@string/document" />
+            
+        <!-- НОВЫЙ ПУНКТ МЕНЮ "ПОЖЕРТВОВАТЬ" -->
+        <item
+            android:id="@+id/nav_donate"
+            android:icon="@drawable/ic_baseline_card_giftcard_24"
+            android:title="Пожертвовать" />
+            
         <item
             android:id="@+id/nav_about"
             android:icon="@drawable/ic_baseline_info_24"
