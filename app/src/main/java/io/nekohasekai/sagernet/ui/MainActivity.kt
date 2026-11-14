@@ -343,7 +343,12 @@ class MainActivity : ThemedActivity(),
                 launchCustomTab("https://matsuridayo.github.io/")
                 return false
             }
-
+            
+            R.id.nav_donate -> {
+                launchCustomTab("https://yoomoney.ru/to/4100119515794399")
+                return false
+            }
+            
             R.id.nav_about -> displayFragment(AboutFragment())
             
             else -> return false
