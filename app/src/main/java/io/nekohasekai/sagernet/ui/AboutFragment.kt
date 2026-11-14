@@ -108,17 +108,7 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                                 .subText(Libcore.versionBox())
                                 .setOnClickAction { }
                                 .build())
-                        .addItem(
-                            MaterialAboutActionItem.Builder()
-                                .icon(R.drawable.ic_baseline_card_giftcard_24)
-                                .text(R.string.donate)
-                                .subText(R.string.donate_info)
-                                .setOnClickAction {
-                                    requireContext().launchCustomTab(
-                                        "https://yoomoney.ru/to/4100119515794399"
-                                    )
-                                }
-                                .build())
+                        
                         .apply {
                             PackageCache.awaitLoadSync()
                             for ((_, pkg) in PackageCache.installedPluginPackages) {
