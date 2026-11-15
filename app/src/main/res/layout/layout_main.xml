@@ -48,6 +48,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_gravity="bottom"
+            android:layout_marginBottom="50dp"
             android:nextFocusUp="@+id/fab"
             app:backgroundTint="?colorMaterial300"
             app:contentInsetStart="0dp"
@@ -97,6 +98,13 @@
             </LinearLayout>
 
         </io.nekohasekai.sagernet.widget.StatsBar>
+
+        <com.yandex.mobile.ads.banner.BannerAdView
+            android:id="@+id/bannerAdView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            app:adUnitId="R-M-20422645-1" />
 
     </androidx.coordinatorlayout.widget.CoordinatorLayout>
 
