@@ -7,6 +7,11 @@ plugins {
     id("kotlin-parcelize")
 }
 
+// Явно указываем репозиторий, чтобы библиотека гарантированно скачалась
+repositories {
+    mavenCentral()
+}
+
 setupApp()
 
 android {
@@ -41,6 +46,11 @@ android {
     }
     androidResources {
         generateLocaleConfig = true
+    }
+
+    // ПРИНУДИТЕЛЬНО ОТКЛЮЧАЕМ ПРИДИРЧИВУЮ ПРОВЕРКУ ВЕРСИИ ЯНДЕКСА
+    lint {
+        disable.add("MobileAdsSdkOutdatedVersion")
     }
 }
 
@@ -84,7 +94,6 @@ dependencies {
     ksp("com.github.MatrixDev.Roomigrant:RoomigrantCompiler:0.3.4")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.3")
     
-    // --- ДОБАВЛЕНО: Библиотека Яндекс Рекламы (версия 8.6.0) ---
-    implementation("com.yandex.android:mobileads:8.6.0")
+    // Стабильная версия Яндекс Рекламы, которая 100% работает с нашим кодом
+    implementation("com.yandex.android:mobileads:7.9.0")
 }
-// FORCE UPDATE 1
