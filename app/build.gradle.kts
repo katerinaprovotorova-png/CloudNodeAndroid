@@ -28,10 +28,8 @@ android {
         aidl = true
     }
     
-    // 1. Оставляем оригинальный namespace. Это говорит компилятору, где искать файлы кода (R, BuildConfig).
     namespace = "io.nekohasekai.sagernet"
     
-    // 2. Меняем applicationId. Это говорит системе Android, что это НОВОЕ, независимое приложение CloudNode.
     defaultConfig {
         applicationId = "com.cloudnode.app"
     }
@@ -85,5 +83,7 @@ dependencies {
     implementation("com.github.MatrixDev.Roomigrant:RoomigrantLib:0.3.4")
     ksp("com.github.MatrixDev.Roomigrant:RoomigrantCompiler:0.3.4")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.3")
+    
+    // --- ДОБАВЛЕНО: Библиотека Яндекс Рекламы (версия 8.6.0) ---
     implementation("com.yandex.android:mobileads:8.6.0")
 }
