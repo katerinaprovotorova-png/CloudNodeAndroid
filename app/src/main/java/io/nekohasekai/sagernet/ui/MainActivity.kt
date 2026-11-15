@@ -103,23 +103,27 @@ class MainActivity : ThemedActivity(),
         binding.bannerAdView.setAdSize(BannerAdSize.stickySize(this, adWidthPx))
 
         binding.bannerAdView.setBannerAdEventListener(object : BannerAdEventListener {
-        override fun onAdLoaded() {
-        // когда баннер загрузился — поднимаем панель скорости на его высоту
-        binding.bannerAdView.post {
-            val lp = binding.stats.layoutParams as CoordinatorLayout.LayoutParams
-            lp.bottomMargin = binding.bannerAdView.height
-            binding.stats.layoutParams = lp
-        }
-    }
-    override fun onAdFailedToLoad(error: LoadAdError) {}
-    override fun onAdImpression() {}
-    override fun onAdClicked() {}
-    override fun onAdLeftApplication() {}
-    override fun onAdClosed() {}
-    override fun onAdOpened() {}
-})
+            override fun onAdLoaded() {
+                // Когда баннер загрузился, поднимаем панель скорости (StatsBar) на его высоту
+                binding.bannerAdView.post {
+                    val lp = binding.stats.layoutParams as CoordinatorLayout.LayoutParams
+                    lp.bottomMargin = binding.bannerAdView.height
+                    binding.stats.layoutParams = lp
+                }
+            }
 
-binding.bannerAdView.loadAd(AdRequest.Builder().build())
+            override fun onAdFailedToLoad(error: AdRequestError) {
+                // Баннер не загрузился (например, нет интернета или нет рекламы)
+                // Ничего не делаем, панель остается на месте
+            }
+
+            override fun onAdClicked() {}
+            override fun onLeftApplication() {}
+            override fun onReturnedToApplication() {}
+            override fun onImpression(impressionData: ImpressionData?) {}
+        })
+
+        binding.bannerAdView.loadAd(AdRequest.Builder().build())
         // --------------------------------------
 
         changeState(BaseService.State.Idle)
