@@ -64,9 +64,15 @@
         android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.Start">
-        <meta-data
-            android:name="android.app.shortcuts"
-            android:resource="@xml/shortcuts" />
+
+       <!-- Yandex Ads App ID -->
+       <meta-data
+           android:name="com.yandex.mobile.ads.APPLICATION_ID"
+           android:value="20422645" />
+
+       <meta-data
+           android:name="android.app.shortcuts"
+           android:resource="@xml/shortcuts" />
 
         <activity
             android:name="io.nekohasekai.sagernet.ui.BlankActivity"
