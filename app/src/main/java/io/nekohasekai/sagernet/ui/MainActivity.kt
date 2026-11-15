@@ -66,10 +66,7 @@ class MainActivity : ThemedActivity(),
 
         binding = LayoutMainBinding.inflate(layoutInflater)
         binding.fab.initProgress(binding.fabProgress)
-        if (themeResId !in intArrayOf(
-                R.style.Theme_SagerNet_Black
-            )
-        ) {
+        if (themeResId !in intArrayOf(R.style.Theme_SagerNet_Black)) {
             navigation = binding.navView
             binding.drawerLayout.removeView(binding.navViewBlack)
         } else {
@@ -90,20 +87,18 @@ class MainActivity : ThemedActivity(),
         }
 
         binding.fab.setOnClickListener {
-            if (DataStore.serviceState.canStop) SagerNet.stopService() else connect.launch(
-                null
-            )
+            if (DataStore.serviceState.canStop) SagerNet.stopService() else connect.launch(null)
         }
         binding.stats.setOnClickListener { if (DataStore.serviceState.connected) binding.stats.testConnection() }
 
         setContentView(binding.root)
         
-        // --- ИНИЦИАЛИЗАЦИЯ И ЗАГРУЗКА ЯНДЕКС РЕКЛАМЫ ---
+        // --- ИНИЦИАЛИЗАЦИЯ ЯНДЕКС РЕКЛАМЫ ---
         MobileAds.initialize(this) {}
         binding.bannerAdView.setAdUnitId("R-M-20422645-1")
         binding.bannerAdView.setAdSize(AdSize.stickySize(this))
         binding.bannerAdView.loadAd(AdRequest.Builder().build())
-        // ------------------------------------------------
+        // --------------------------------------
 
         changeState(BaseService.State.Idle)
         connection.connect(this, this)
@@ -117,12 +112,9 @@ class MainActivity : ThemedActivity(),
         refreshNavMenu(DataStore.enableClashAPI)
 
         if (Build.VERSION.SDK_INT >= 33) {
-            val checkPermission =
-                ContextCompat.checkSelfPermission(this@MainActivity, POST_NOTIFICATIONS)
+            val checkPermission = ContextCompat.checkSelfPermission(this@MainActivity, POST_NOTIFICATIONS)
             if (checkPermission != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(
-                    this@MainActivity, arrayOf(POST_NOTIFICATIONS), 0
-                )
+                ActivityCompat.requestPermissions(this@MainActivity, arrayOf(POST_NOTIFICATIONS), 0)
             }
         }
 
@@ -189,9 +181,7 @@ class MainActivity : ThemedActivity(),
             displayFragmentWithId(R.id.nav_group)
             MaterialAlertDialogBuilder(this@MainActivity).setTitle(R.string.subscription_import)
                 .setMessage(getString(R.string.subscription_import_message, name))
-                .setPositiveButton(R.string.yes) { _, _ ->
-                    runOnDefaultDispatcher { finishImportSubscription(group) }
-                }
+                .setPositiveButton(R.string.yes) { _, _ -> runOnDefaultDispatcher { finishImportSubscription(group) } }
                 .setNegativeButton(android.R.string.cancel, null)
                 .show()
         }
@@ -213,9 +203,7 @@ class MainActivity : ThemedActivity(),
         onMainDispatcher {
             MaterialAlertDialogBuilder(this@MainActivity).setTitle(R.string.profile_import)
                 .setMessage(getString(R.string.profile_import_message, profile.displayName()))
-                .setPositiveButton(R.string.yes) { _, _ ->
-                    runOnDefaultDispatcher { finishImportProfile(profile) }
-                }
+                .setPositiveButton(R.string.yes) { _, _ -> runOnDefaultDispatcher { finishImportProfile(profile) } }
                 .setNegativeButton(android.R.string.cancel, null)
                 .show()
         }
@@ -303,7 +291,6 @@ class MainActivity : ThemedActivity(),
             R.id.nav_traffic -> displayFragment(WebviewFragment())
             R.id.nav_tools -> displayFragment(ToolsFragment())
             R.id.nav_logcat -> displayFragment(LogcatFragment())
-                      
             R.id.nav_donate -> {
                 launchCustomTab("https://yoomoney.ru/to/4100119515794399")
                 return false
