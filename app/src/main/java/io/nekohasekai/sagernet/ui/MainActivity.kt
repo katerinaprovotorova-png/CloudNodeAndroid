@@ -20,7 +20,7 @@ import com.google.android.material.navigation.NavigationView
 import com.google.android.material.snackbar.Snackbar
 import com.yandex.mobile.ads.common.AdRequest
 import com.yandex.mobile.ads.common.MobileAds
-import com.yandex.mobile.ads.banner.AdSize
+import com.yandex.mobile.ads.banner.BannerAdSize
 import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.GroupType
 import io.nekohasekai.sagernet.Key
@@ -96,7 +96,7 @@ class MainActivity : ThemedActivity(),
         // --- ИНИЦИАЛИЗАЦИЯ ЯНДЕКС РЕКЛАМЫ ---
         MobileAds.initialize(this) {}
         binding.bannerAdView.setAdUnitId("R-M-20422645-1")
-        binding.bannerAdView.setAdSize(AdSize.stickySize(this))
+        binding.bannerAdView.setAdSize(BannerAdSize.stickySize(this))
         binding.bannerAdView.loadAd(AdRequest.Builder().build())
         // --------------------------------------
 
