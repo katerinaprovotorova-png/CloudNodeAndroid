@@ -15,6 +15,9 @@ import androidx.annotation.IdRes
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.preference.PreferenceDataStore
+import androidx.coordinatorlayout.widget.CoordinatorLayout
+import com.yandex.mobile.ads.banner.BannerAdEventListener
+import com.yandex.mobile.ads.common.LoadAdError
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.navigation.NavigationView
 import com.google.android.material.snackbar.Snackbar
