@@ -87,3 +87,4 @@ dependencies {
     // --- ДОБАВЛЕНО: Библиотека Яндекс Рекламы (версия 8.6.0) ---
     implementation("com.yandex.android:mobileads:8.6.0")
 }
+// FORCE UPDATE 1
