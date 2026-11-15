@@ -15,15 +15,12 @@ import androidx.annotation.IdRes
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.preference.PreferenceDataStore
-import com.yandex.mobile.ads.banner.BannerAdSize
-import com.yandex.mobile.ads.common.AdRequest
-import com.yandex.mobile.ads.common.MobileAds
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.navigation.NavigationView
 import com.google.android.material.snackbar.Snackbar
+import com.yandex.mobile.ads.banner.BannerAdSize
 import com.yandex.mobile.ads.common.AdRequest
 import com.yandex.mobile.ads.common.MobileAds
-import com.yandex.mobile.ads.banner.BannerAdSize
 import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.GroupType
 import io.nekohasekai.sagernet.Key
@@ -101,28 +98,6 @@ class MainActivity : ThemedActivity(),
         binding.bannerAdView.setAdUnitId("R-M-20422645-1")
         val adWidthPx = resources.displayMetrics.widthPixels
         binding.bannerAdView.setAdSize(BannerAdSize.stickySize(this, adWidthPx))
-
-        binding.bannerAdView.setBannerAdEventListener(object : BannerAdEventListener {
-            override fun onAdLoaded() {
-                // Когда баннер загрузился, поднимаем панель скорости (StatsBar) на его высоту
-                binding.bannerAdView.post {
-                    val lp = binding.stats.layoutParams as CoordinatorLayout.LayoutParams
-                    lp.bottomMargin = binding.bannerAdView.height
-                    binding.stats.layoutParams = lp
-                }
-            }
-
-            override fun onAdFailedToLoad(error: AdRequestError) {
-                // Баннер не загрузился (например, нет интернета или нет рекламы)
-                // Ничего не делаем, панель остается на месте
-            }
-
-            override fun onAdClicked() {}
-            override fun onLeftApplication() {}
-            override fun onReturnedToApplication() {}
-            override fun onImpression(impressionData: ImpressionData?) {}
-        })
-
         binding.bannerAdView.loadAd(AdRequest.Builder().build())
         // --------------------------------------
 
