@@ -98,12 +98,12 @@ class MainActivity : ThemedActivity(),
 
         setContentView(binding.root)
         
-        // --- ДОБАВЛЕНО: Инициализация и загрузка Яндекс Рекламы ---
+        // --- ИНИЦИАЛИЗАЦИЯ И ЗАГРУЗКА ЯНДЕКС РЕКЛАМЫ ---
         MobileAds.initialize(this) {}
         binding.bannerAdView.setAdUnitId("R-M-20422645-1")
         binding.bannerAdView.setAdSize(AdSize.stickySize(this))
         binding.bannerAdView.loadAd(AdRequest.Builder().build())
-        // -----------------------------------------------------------
+        // ------------------------------------------------
 
         changeState(BaseService.State.Idle)
         connection.connect(this, this)
