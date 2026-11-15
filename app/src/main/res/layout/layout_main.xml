@@ -18,7 +18,6 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
-        <!-- We double trackThickness as half of it will be invisible -->
         <com.google.android.material.progressindicator.CircularProgressIndicator
             android:id="@+id/fabProgress"
             android:layout_width="wrap_content"
@@ -99,12 +98,12 @@
 
         </io.nekohasekai.sagernet.widget.StatsBar>
 
+        <!-- Яндекс Рекламный Баннер -->
         <com.yandex.mobile.ads.banner.BannerAdView
             android:id="@+id/bannerAdView"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_gravity="bottom"
-            app:adUnitId="R-M-20422645-1" />
+            android:layout_gravity="bottom" />
 
     </androidx.coordinatorlayout.widget.CoordinatorLayout>
 
