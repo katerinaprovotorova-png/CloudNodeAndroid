@@ -98,7 +98,25 @@ class MainActivity : ThemedActivity(),
         binding.bannerAdView.setAdUnitId("R-M-20422645-1")
         val adWidthPx = resources.displayMetrics.widthPixels
         binding.bannerAdView.setAdSize(BannerAdSize.stickySize(this, adWidthPx))
-        binding.bannerAdView.loadAd(AdRequest.Builder().build())
+
+        binding.bannerAdView.setBannerAdEventListener(object : BannerAdEventListener {
+        override fun onAdLoaded() {
+        // когда баннер загрузился — поднимаем панель скорости на его высоту
+        binding.bannerAdView.post {
+            val lp = binding.stats.layoutParams as CoordinatorLayout.LayoutParams
+            lp.bottomMargin = binding.bannerAdView.height
+            binding.stats.layoutParams = lp
+        }
+    }
+    override fun onAdFailedToLoad(error: LoadAdError) {}
+    override fun onAdImpression() {}
+    override fun onAdClicked() {}
+    override fun onAdLeftApplication() {}
+    override fun onAdClosed() {}
+    override fun onAdOpened() {}
+})
+
+binding.bannerAdView.loadAd(AdRequest.Builder().build())
         // --------------------------------------
 
         changeState(BaseService.State.Idle)
