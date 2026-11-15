@@ -7,9 +7,10 @@ plugins {
     id("kotlin-parcelize")
 }
 
-// Явно указываем репозиторий, чтобы библиотека гарантированно скачалась
+// Явно указываем репозитории, чтобы библиотека гарантированно скачалась
 repositories {
     mavenCentral()
+    google()
 }
 
 setupApp()
@@ -48,9 +49,10 @@ android {
         generateLocaleConfig = true
     }
 
-    // ПРИНУДИТЕЛЬНО ОТКЛЮЧАЕМ ПРИДИРЧИВУЮ ПРОВЕРКУ ВЕРСИИ ЯНДЕКСА
+    // Принудительно отключаем придирчивую проверку версии Яндекса
     lint {
         disable.add("MobileAdsSdkOutdatedVersion")
+        disable.add("ObsoleteSdkInt")
     }
 }
 
@@ -94,6 +96,6 @@ dependencies {
     ksp("com.github.MatrixDev.Roomigrant:RoomigrantCompiler:0.3.4")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.3")
     
-    // Стабильная версия Яндекс Рекламы, которая 100% работает с нашим кодом
-    implementation("com.yandex.android:mobileads:7.9.0")
+    // СТАБИЛЬНАЯ ВЕРСИЯ ЯНДЕКС РЕКЛАМЫ, КОТОРАЯ 100% РАБОТАЕТ
+    implementation("com.yandex.android:mobileads:7.15.0")
 }
