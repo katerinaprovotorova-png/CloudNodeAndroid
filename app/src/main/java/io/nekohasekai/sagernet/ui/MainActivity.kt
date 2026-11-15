@@ -96,7 +96,8 @@ class MainActivity : ThemedActivity(),
         // --- ИНИЦИАЛИЗАЦИЯ ЯНДЕКС РЕКЛАМЫ ---
         MobileAds.initialize(this) {}
         binding.bannerAdView.setAdUnitId("R-M-20422645-1")
-        binding.bannerAdView.setAdSize(BannerAdSize.stickySize(this))
+        val adWidthPx = resources.displayMetrics.widthPixels
+        binding.bannerAdView.setAdSize(BannerAdSize.stickySize(this, adWidthPx))
         binding.bannerAdView.loadAd(AdRequest.Builder().build())
         // --------------------------------------
 
