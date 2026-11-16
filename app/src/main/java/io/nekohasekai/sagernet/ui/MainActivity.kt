@@ -12,14 +12,18 @@ import android.view.KeyEvent
 import android.view.MenuItem
 import androidx.activity.addCallback
 import androidx.annotation.IdRes
+import androidx.coordinatorlayout.widget.CoordinatorLayout
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.preference.PreferenceDataStore
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.navigation.NavigationView
 import com.google.android.material.snackbar.Snackbar
+import com.yandex.mobile.ads.banner.BannerAdEventListener
 import com.yandex.mobile.ads.banner.BannerAdSize
 import com.yandex.mobile.ads.common.AdRequest
+import com.yandex.mobile.ads.common.AdRequestError
+import com.yandex.mobile.ads.common.ImpressionData
 import com.yandex.mobile.ads.common.MobileAds
 import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.GroupType
@@ -98,6 +102,31 @@ class MainActivity : ThemedActivity(),
         binding.bannerAdView.setAdUnitId("R-M-20422645-1")
         val adWidthPx = resources.displayMetrics.widthPixels
         binding.bannerAdView.setAdSize(BannerAdSize.stickySize(this, adWidthPx))
+
+        // Слушаем событие успешной загрузки баннера для динамической подстройки отступа
+        binding.bannerAdView.setBannerAdEventListener(object : BannerAdEventListener {
+            override fun onAdLoaded() {
+                // Ждем, пока баннер реально отрисует свои размеры на экране
+                binding.bannerAdView.post {
+                    val lp = binding.stats.layoutParams as CoordinatorLayout.LayoutParams
+                    val bannerHeight = binding.bannerAdView.height
+                    // Поднимаем панель ровно на высоту баннера + 8 пикселей небольшого запаса
+                    lp.bottomMargin = bannerHeight + 8
+                    binding.stats.layoutParams = lp
+                }
+            }
+
+            override fun onAdFailedToLoad(error: AdRequestError) {
+                // Если реклама не загрузилась, ничего не меняем. 
+                // Сработает страховочный отступ 80dp, который мы задали в XML.
+            }
+
+            override fun onAdClicked() {}
+            override fun onLeftApplication() {}
+            override fun onReturnedToApplication() {}
+            override fun onImpression(impressionData: ImpressionData?) {}
+        })
+
         binding.bannerAdView.loadAd(AdRequest.Builder().build())
         // --------------------------------------
 
