@@ -21,7 +21,6 @@ import com.google.android.material.navigation.NavigationView
 import com.google.android.material.snackbar.Snackbar
 import com.yandex.mobile.ads.banner.BannerAdEventListener
 import com.yandex.mobile.ads.banner.BannerAdSize
-import com.yandex.mobile.ads.common.AdError
 import com.yandex.mobile.ads.common.AdRequest
 import com.yandex.mobile.ads.common.AdRequestError
 import com.yandex.mobile.ads.common.ImpressionData
@@ -29,8 +28,6 @@ import com.yandex.mobile.ads.common.MobileAds
 import com.yandex.mobile.ads.common.Reward
 import com.yandex.mobile.ads.rewarded.RewardedAd
 import com.yandex.mobile.ads.rewarded.RewardedAdEventListener
-import com.yandex.mobile.ads.rewarded.RewardedAdLoader
-import com.yandex.mobile.ads.rewarded.RewardedAdLoadListener
 import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.GroupType
 import io.nekohasekai.sagernet.Key
@@ -129,7 +126,9 @@ class MainActivity : ThemedActivity(),
                     binding.stats.layoutParams = lp
                 }
             }
-            override fun onAdFailedToLoad(error: AdRequestError) {}
+            override fun onAdFailedToLoad(error: AdRequestError) {
+                // Если баннер не загрузился, оставляем страховочный отступ из XML (80dp)
+            }
             override fun onAdClicked() {}
             override fun onLeftApplication() {}
             override fun onReturnedToApplication() {}
@@ -138,7 +137,7 @@ class MainActivity : ThemedActivity(),
         binding.bannerAdView.loadAd(AdRequest.Builder().build())
         // -----------------------------------------------
 
-        // Инициализируем вознаграждаемую рекламу заранее
+        // Инициализируем вознаграждаемую рекламу (строго по API SDK 7)
         initRewardedAd()
 
         changeState(BaseService.State.Idle)
@@ -170,34 +169,33 @@ class MainActivity : ThemedActivity(),
 
     // --- ЛОГИКА ВОЗНАГРАЖДАЕМОЙ РЕКЛАМЫ (SDK 7) ---
     private fun initRewardedAd() {
-        val loader = RewardedAdLoader(this).apply {
-            setAdLoadListener(object : RewardedAdLoadListener {
-                override fun onAdLoaded(ad: RewardedAd) {
-                    rewardedAd = ad
-                    // Вешаем слушатель событий на загруженную рекламу
-                    rewardedAd?.setAdEventListener(object : RewardedAdEventListener {
-                        override fun onAdClicked() {}
-                        override fun onAdLeftApplication() {}
-                        override fun onAdClosed() {}
-                        override fun onAdShown() {}
-                        override fun onAdFailedToShow(adError: AdError) {}
-                        
-                        override fun onRewarded(reward: Reward) {
-                            // ПОЛЬЗОВАТЕЛЬ ПОСМОТРЕЛ РЕКЛАМУ ДО КОНЦА!
-                            snackbar("Спасибо! Добавлено 30 минут.").show()
-                            connect.launch(null) // Переподключаем VPN
-                            startSessionTimer()  // Перезапускаем таймер
-                        }
-                    })
+        rewardedAd = RewardedAd(this).apply {
+            setAdUnitId(REWARDED_AD_UNIT_ID)
+            setAdEventListener(object : RewardedAdEventListener {
+                override fun onLoaded() {
+                    // Реклама загружена и готова к показу
                 }
 
                 override fun onAdFailedToLoad(error: AdRequestError) {
-                    // Реклама не загрузилась (например, нет интернета)
+                    // Ошибка загрузки (например, нет интернета или блок на модерации)
+                }
+
+                override fun onAdShown() {}
+                override fun onAdClicked() {}
+                override fun onLeftApplication() {}
+                override fun onReturnedToApplication() {}
+                override fun onImpression(impressionData: ImpressionData?) {}
+
+                override fun onRewarded(reward: Reward) {
+                    // ПОЛЬЗОВАТЕЛЬ ПОСМОТРЕЛ РЕКЛАМУ ДО КОНЦА!
+                    snackbar("Спасибо! Добавлено 30 минут.").show()
+                    connect.launch(null) // Переподключаем VPN
+                    startSessionTimer()  // Перезапускаем таймер
                 }
             })
+            // В SDK 7 AdRequest.Builder() не принимает аргументов, ID задается через setAdUnitId выше
+            loadAd(AdRequest.Builder().build())
         }
-        // Запускаем загрузку с указанием ID блока
-        loader.loadAd(AdRequest.Builder(REWARDED_AD_UNIT_ID).build())
     }
 
     private fun showRewardedAdDialog() {
@@ -230,8 +228,7 @@ class MainActivity : ThemedActivity(),
             
             if (DataStore.serviceState.canStop) {
                 SagerNet.stopService() // Мягко отключаем VPN
-                // После delay корутина автоматически возобновляется в Main потоке, 
-                // поэтому showRewardedAdDialog() можно вызывать напрямую.
+                // После delay корутина автоматически возобновляется в Main потоке
                 showRewardedAdDialog()
             }
         }
@@ -518,4 +515,3 @@ class MainActivity : ThemedActivity(),
         val fragment = supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
         return fragment != null && fragment.onKeyDown(keyCode, event)
     }
-}
