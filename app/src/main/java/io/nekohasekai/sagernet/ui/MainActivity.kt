@@ -46,6 +46,7 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupManager
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyGroup
+import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.SubscriptionBean
 import io.nekohasekai.sagernet.database.preference.OnPreferenceDataStoreChangeListener
 import io.nekohasekai.sagernet.databinding.LayoutMainBinding
@@ -234,21 +235,11 @@ class MainActivity : ThemedActivity(),
     // ================= УМНОЕ ПОДКЛЮЧЕНИЕ (ПРОВЕРКА ТРИАЛА) =================
 
     private fun checkAndConnectTrialIfNeeded() {
-        // Ищем существующую триал-группу
-        val existingGroup = GroupManager.getGroups().firstOrNull { 
-            it.name == "CloudNode Trial" && it.type == GroupType.SUBSCRIPTION 
-        }
-        
-        val profiles = existingGroup?.let { ProfileManager.getProfiles(it.id) } ?: emptyList()
-
-        if (existingGroup != null && profiles.isNotEmpty()) {
-            // Триал уже есть и профили загружены -> просто подключаем
-            DataStore.selectedGroup = existingGroup.id
-            DataStore.selectedProxy = profiles.first().id
-            DataStore.currentProfile = profiles.first().id
+        // Если уже есть выбранная конфигурация, просто подключаем её (без создания новых пользователей)
+        if (DataStore.selectedGroup > 0 && DataStore.selectedProxy > 0) {
             connect.launch(null)
         } else {
-            // Триала нет или профили не загрузились -> получаем с сервера
+            // Если конфигурации нет, получаем триал с сервера
             fetchAndConnectTrial()
         }
     }
@@ -270,33 +261,30 @@ class MainActivity : ThemedActivity(),
                 val extractedLink = linkRegex.find(rawResponse)?.groupValues?.get(1) ?: rawResponse
                 val newLink = extractedLink.replace(OLD_API_DOMAIN, NEW_API_DOMAIN)
 
-                // Создаем или обновляем группу
-                val existing = GroupManager.getGroups().firstOrNull { it.subscription?.link == newLink }
-                val targetGroup = if (existing != null) {
-                    GroupUpdater.startUpdate(existing, false)
-                    existing
-                } else {
-                    val group = ProxyGroup(type = GroupType.SUBSCRIPTION, name = "CloudNode Trial")
-                    val subscription = SubscriptionBean().apply { link = newLink }
-                    group.subscription = subscription
-                    GroupManager.createGroup(group).also { GroupUpdater.startUpdate(it, false) }
-                }
-
-                DataStore.selectedGroup = targetGroup.id
+                // Создаем новую группу триала
+                val group = ProxyGroup(type = GroupType.SUBSCRIPTION, name = "CloudNode Trial")
+                val subscription = SubscriptionBean().apply { link = newLink }
+                group.subscription = subscription
+                
+                val createdGroup = GroupManager.createGroup(group)
+                GroupUpdater.startUpdate(createdGroup, false)
+                
+                DataStore.selectedGroup = createdGroup.id
 
                 // Ждем загрузки профилей (до 15 сек)
-                var profiles: List<AbstractBean> = emptyList()
+                var profiles: List<ProxyEntity> = emptyList()
                 for (i in 0 until 30) {
                     delay(500)
-                    profiles = ProfileManager.getProfiles(targetGroup.id)
+                    profiles = ProfileManager.getProfiles(createdGroup.id)
                     if (profiles.isNotEmpty()) break
                 }
 
                 onMainDispatcher {
                     binding.fab.isEnabled = true
                     if (profiles.isNotEmpty()) {
-                        DataStore.selectedProxy = profiles.first().id
-                        DataStore.currentProfile = profiles.first().id
+                        val first = profiles.first()
+                        DataStore.selectedProxy = first.id
+                        DataStore.currentProfile = first.id
                         snackbar("✅ Доступ получен! Подключаем...").show()
                         connect.launch(null) // ЗАПУСКАЕМ ПОДКЛЮЧЕНИЕ
                     } else {
@@ -338,7 +326,7 @@ class MainActivity : ThemedActivity(),
     }
 
     // ===============================================================
-    // (Остальные стандартные методы импорта и навигации остаются без изменений)
+    // (Остальные стандартные методы импорта и навигации)
     // ===============================================================
 
     fun refreshNavMenu(clashApi: Boolean) {
