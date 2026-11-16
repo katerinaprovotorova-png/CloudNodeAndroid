@@ -25,6 +25,9 @@ import com.yandex.mobile.ads.common.AdRequest
 import com.yandex.mobile.ads.common.AdRequestError
 import com.yandex.mobile.ads.common.ImpressionData
 import com.yandex.mobile.ads.common.MobileAds
+import com.yandex.mobile.ads.common.Reward
+import com.yandex.mobile.ads.rewarded.RewardedAd
+import com.yandex.mobile.ads.rewarded.RewardedAdEventListener
 import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.GroupType
 import io.nekohasekai.sagernet.Key
@@ -55,6 +58,10 @@ import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.ktx.parseProxies
 import io.nekohasekai.sagernet.ktx.readableMessage
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import moe.matsuri.nb4a.utils.Util
 
 class MainActivity : ThemedActivity(),
@@ -64,6 +71,11 @@ class MainActivity : ThemedActivity(),
 
     lateinit var binding: LayoutMainBinding
     lateinit var navigation: NavigationView
+
+    // Переменные для таймера сессии и вознаграждаемой рекламы
+    private var sessionTimerJob: Job? = null
+    private var rewardedAd: RewardedAd? = null
+    private val REWARDED_AD_UNIT_ID = "R-M-XXXXXX-Y" // <-- ЗАМЕНИ НА СВОЙ ID ВОЗНАГРАЖДАЕМОЙ РЕКЛАМЫ ИЗ КАБИНЕТА ЯНДЕКСА
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -97,38 +109,32 @@ class MainActivity : ThemedActivity(),
 
         setContentView(binding.root)
         
-        // --- ИНИЦИАЛИЗАЦИЯ ЯНДЕКС РЕКЛАМЫ ---
+        // --- ИНИЦИАЛИЗАЦИЯ ЯНДЕКС РЕКЛАМЫ (БАННЕР) ---
         MobileAds.initialize(this) {}
         binding.bannerAdView.setAdUnitId("R-M-20422645-1")
         val adWidthPx = resources.displayMetrics.widthPixels
         binding.bannerAdView.setAdSize(BannerAdSize.stickySize(this, adWidthPx))
 
-        // Слушаем событие успешной загрузки баннера для динамической подстройки отступа
         binding.bannerAdView.setBannerAdEventListener(object : BannerAdEventListener {
             override fun onAdLoaded() {
-                // Ждем, пока баннер реально отрисует свои размеры на экране
                 binding.bannerAdView.post {
                     val lp = binding.stats.layoutParams as CoordinatorLayout.LayoutParams
                     val bannerHeight = binding.bannerAdView.height
-                    // Поднимаем панель ровно на высоту баннера + 8 пикселей небольшого запаса
                     lp.bottomMargin = bannerHeight + 8
                     binding.stats.layoutParams = lp
                 }
             }
-
-            override fun onAdFailedToLoad(error: AdRequestError) {
-                // Если реклама не загрузилась, ничего не меняем. 
-                // Сработает страховочный отступ 80dp, который мы задали в XML.
-            }
-
+            override fun onAdFailedToLoad(error: AdRequestError) {}
             override fun onAdClicked() {}
             override fun onLeftApplication() {}
             override fun onReturnedToApplication() {}
             override fun onImpression(impressionData: ImpressionData?) {}
         })
-
         binding.bannerAdView.loadAd(AdRequest.Builder().build())
-        // --------------------------------------
+        // -----------------------------------------------
+
+        // Инициализируем вознаграждаемую рекламу заранее, чтобы она грузилась быстрее
+        initRewardedAd()
 
         changeState(BaseService.State.Idle)
         connection.connect(this, this)
@@ -156,6 +162,74 @@ class MainActivity : ThemedActivity(),
                 .show()
         }
     }
+
+    // --- ЛОГИКА ВОЗНАГРАЖДАЕМОЙ РЕКЛАМЫ ---
+    private fun initRewardedAd() {
+        rewardedAd = RewardedAd(this, REWARDED_AD_UNIT_ID).apply {
+            setRewardedAdEventListener(object : RewardedAdEventListener {
+                override fun onAdLoaded() {
+                    // Реклама загрузилась и готова к показу
+                }
+
+                override fun onAdFailedToLoad(error: AdRequestError) {
+                    // Если видео не загрузилось, даем пользователю возможность просто переподключиться
+                }
+
+                override fun onAdShown() {}
+                override fun onAdClicked() {}
+                override fun onAdLeftApplication() {}
+                override fun onAdDismissed() {}
+                
+                override fun onRewarded(reward: Reward) {
+                    // ПОЛЬЗОВАТЕЛЬ ПОСМОТРЕЛ РЕКЛАМУ ДО КОНЦА!
+                    onMainDispatcher {
+                        snackbar("Спасибо! Добавлено 30 минут.").show()
+                        connect.launch(null) // Переподключаем VPN
+                        startSessionTimer()  // Перезапускаем таймер
+                    }
+                }
+            })
+        }
+    }
+
+    private fun showTimeLimitDialog() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle("⏱ Лимит бесплатной сессии")
+            .setMessage("Бесплатное время истекло. Посмотрите короткое видео, чтобы получить еще 30 минут работы VPN.")
+            .setPositiveButton("Посмотреть рекламу") { _, _ ->
+                if (rewardedAd?.isLoaded == true) {
+                    rewardedAd?.show()
+                } else {
+                    snackbar("Реклама загружается, попробуйте через пару секунд...").show()
+                    // Пробуем загрузить и показать, если не получилось сразу
+                    rewardedAd?.loadAd(AdRequest.Builder().build())
+                }
+            }
+            .setNegativeButton("Просто переподключить") { _, _ ->
+                // Запасной вариант, чтобы пользователь не злился, если реклама не грузится
+                connect.launch(null)
+                startSessionTimer()
+            }
+            .setCancelable(false) // Запрещаем закрывать окно нажатием вне его
+            .show()
+    }
+
+    private fun startSessionTimer() {
+        sessionTimerJob?.cancel()
+        sessionTimerJob = MainScope().launch {
+            // 30 минут = 30 * 60 * 1000 миллисекунд. 
+            // ДЛЯ ТЕСТА МОЖЕШЬ ПОСТАВИТЬ 60 * 1000 (1 минута)
+            delay(30 * 60 * 1000L) 
+            
+            if (DataStore.serviceState.canStop) {
+                SagerNet.stopService() // Мягко отключаем VPN
+                onMainDispatcher {
+                    showTimeLimitDialog()
+                }
+            }
+        }
+    }
+    // ---------------------------------------
 
     fun refreshNavMenu(clashApi: Boolean) {
         if (::navigation.isInitialized) {
@@ -336,6 +410,14 @@ class MainActivity : ThemedActivity(),
         DataStore.serviceState = state
         binding.fab.changeState(state, DataStore.serviceState, animate)
         binding.stats.changeState(state)
+        
+        // УПРАВЛЕНИЕ ТАЙМЕРОМ ПРИ СМЕНЕ СОСТОЯНИЯ
+        if (state == BaseService.State.Connected) {
+            startSessionTimer()
+        } else {
+            sessionTimerJob?.cancel()
+        }
+
         if (msg != null) snackbar(getString(R.string.vpn_error, msg)).show()
     }
 
