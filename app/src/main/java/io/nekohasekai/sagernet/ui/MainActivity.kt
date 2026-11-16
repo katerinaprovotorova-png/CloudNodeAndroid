@@ -83,7 +83,7 @@ class MainActivity : ThemedActivity(),
     private var rewardedAd: RewardedAd? = null
 
     // ⚠️ НАСТРОЙКИ API И РЕКЛАМЫ
-    private val REWARDED_AD_UNIT_ID = "demo-rewarded-yandex" // Замени на "R-M-20422645-2" после активации в Яндексе
+    private val REWARDED_AD_UNIT_ID = "demo-rewarded-yandex" // Замени на "R-M-20422645-2" после активации
     private val TRIAL_SERVER_URL = "http://157.228.118.129:8081/get_trial"
     private val OLD_API_DOMAIN = "misteria.fvds.ru"
     private val NEW_API_DOMAIN = "157.228.118.129"
@@ -120,6 +120,11 @@ class MainActivity : ThemedActivity(),
             } else {
                 connect.launch(null)
             }
+        }
+
+        // 👇 НОВАЯ КНОПКА "ПОЛУЧИТЬ ДОСТУП" НАД САМОЛЁТИКОМ 👇
+        binding.fabTrial.setOnClickListener {
+            fetchAndImportTrialAccess()
         }
         // ---------------------------------------------
 
@@ -245,7 +250,7 @@ class MainActivity : ThemedActivity(),
             .show()
     }
 
-    // ================= АВТО-ПОЛУЧЕНИЕ ДОСТУПА =================
+    // ================= АВТО-ПОЛУЧЕНИЕ ДОСТУПА (БЕЗ ДИАЛОГА) =================
 
     private fun fetchAndImportTrialAccess() {
         snackbar("Запрос доступа...").show()
@@ -254,33 +259,41 @@ class MainActivity : ThemedActivity(),
                 val client = OkHttpClient()
                 val request = Request.Builder().url(TRIAL_SERVER_URL).build()
                 val response = client.newCall(request).execute()
-                
+
                 if (!response.isSuccessful) throw Exception("Сервер вернул HTTP ${response.code}")
 
                 val rawResponse = response.body?.string()?.trim()
                     ?: throw Exception("Пустой ответ от сервера")
 
-                // Парсим JSON ответ {"link": "http://..."} с помощью простого Regex
+                // Парсим JSON ответ {"link": "http://..."}
                 val linkRegex = """"link"\s*:\s*"([^"]+)"""".toRegex()
                 val matchResult = linkRegex.find(rawResponse)
-                
-                val extractedLink = if (matchResult != null) {
-                    matchResult.groupValues[1]
-                } else {
-                    rawResponse // Fallback, если вдруг вернется просто строка
-                }
+                val extractedLink = matchResult?.groupValues?.get(1) ?: rawResponse
 
                 // Заменяем старый домен на новый IP
                 val newLink = extractedLink.replace(OLD_API_DOMAIN, NEW_API_DOMAIN)
 
-                // Формируем sn:// ссылку и импортируем
-                val uri = Uri.parse("sn://subscription?url=" + Uri.encode(newLink))
+                // Тихое создание подписки без диалога подтверждения
+                val group = ProxyGroup(
+                    type = GroupType.SUBSCRIPTION,
+                    name = "CloudNode Trial"
+                )
+                val subscription = SubscriptionBean()
+                group.subscription = subscription
+                subscription.link = newLink
+
+                val createdGroup = GroupManager.createGroup(group)
+                GroupUpdater.startUpdate(createdGroup, true)
+                DataStore.selectedGroup = createdGroup.id
+
                 onMainDispatcher {
-                    importSubscription(uri)
+                    snackbar("✅ Доступ получен! Нажмите самолётик для подключения.").show()
+                    displayFragmentWithId(R.id.nav_configuration)
                 }
+
             } catch (e: Exception) {
                 onMainDispatcher {
-                    snackbar("Ошибка получения доступа: ${e.message}").show()
+                    snackbar("Ошибка получения доступа: ${e.readableMessage}").show()
                 }
             }
         }
