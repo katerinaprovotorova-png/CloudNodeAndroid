@@ -116,7 +116,7 @@ class MainActivity : ThemedActivity(),
         // --- ЛОГИКА КНОПКИ САМОЛЁТИКА ---
         binding.fab.setOnClickListener {
             if (DataStore.serviceState.canStop) {
-                // Если включен -> предлагаем отключить через рекламу
+                // Если включен -> СРАЗУ запускаем рекламу для отключения (без диалога)
                 confirmStopWithRewardAd()
             } else {
                 // Если выключен -> проверяем, нужен ли триал, и подключаем
@@ -201,6 +201,7 @@ class MainActivity : ThemedActivity(),
     private fun showRewardedAd(afterAd: () -> Unit) {
         val ad = rewardedAd
         if (ad == null) {
+            // Если реклама ещё не загрузилась, просто выполняем действие и пробуем загрузить
             afterAd()
             loadRewardedAd()
             return
@@ -221,15 +222,8 @@ class MainActivity : ThemedActivity(),
     }
 
     private fun confirmStopWithRewardAd() {
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Отключить VPN?")
-            .setMessage("Посмотрите короткое видео, чтобы отключить соединение. Это поддержит работу сервиса.")
-            .setPositiveButton("Посмотреть рекламу и отключить") { _, _ ->
-                showRewardedAd { SagerNet.stopService() }
-            }
-            .setNeutralButton(android.R.string.cancel, null)
-            .setCancelable(true)
-            .show()
+        // СРАЗУ запускаем рекламу, без диалогового окна
+        showRewardedAd { SagerNet.stopService() }
     }
 
     // ================= УМНОЕ ПОДКЛЮЧЕНИЕ (ПРОВЕРКА ТРИАЛА) =================
@@ -272,10 +266,11 @@ class MainActivity : ThemedActivity(),
                 DataStore.selectedGroup = createdGroup.id
 
                 // Ждем загрузки профилей (до 15 сек)
+                // ИСПРАВЛЕНИЕ: getProfiles ожидает List<Long>, а не Long
                 var profiles: List<ProxyEntity> = emptyList()
                 for (i in 0 until 30) {
                     delay(500)
-                    profiles = ProfileManager.getProfiles(createdGroup.id)
+                    profiles = ProfileManager.getProfiles(listOf(createdGroup.id))
                     if (profiles.isNotEmpty()) break
                 }
 
