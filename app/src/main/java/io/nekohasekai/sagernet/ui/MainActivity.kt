@@ -67,6 +67,8 @@ import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import moe.matsuri.nb4a.utils.Util
+import okhttp3.OkHttpClient
+import okhttp3.Request
 
 class MainActivity : ThemedActivity(),
     SagerConnection.Callback,
@@ -80,8 +82,11 @@ class MainActivity : ThemedActivity(),
     private var rewardedAdLoader: RewardedAdLoader? = null
     private var rewardedAd: RewardedAd? = null
 
-    // ⚠️ ID вознаграждаемого блока из кабинета (для теста можно "demo-rewarded-yandex")
-    private val REWARDED_AD_UNIT_ID = "R-M-20422645-2"
+    // ⚠️ НАСТРОЙКИ API И РЕКЛАМЫ
+    private val REWARDED_AD_UNIT_ID = "demo-rewarded-yandex" // Замени на "R-M-20422645-2" после активации в Яндексе
+    private val TRIAL_SERVER_URL = "http://157.228.118.129:8081/get_trial"
+    private val OLD_API_DOMAIN = "misteria.fvds.ru"
+    private val NEW_API_DOMAIN = "157.228.118.129"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -108,7 +113,7 @@ class MainActivity : ThemedActivity(),
             }
         }
 
-        // --- ВЫКЛЮЧЕНИЕ VPN ЧЕРЕЗ РЕКЛАМУ ---
+        // --- ВЫКЛЮЧЕНИЕ VPN ТОЛЬКО ЧЕРЕЗ РЕКЛАМУ ---
         binding.fab.setOnClickListener {
             if (DataStore.serviceState.canStop) {
                 confirmStopWithRewardAd()
@@ -116,7 +121,7 @@ class MainActivity : ThemedActivity(),
                 connect.launch(null)
             }
         }
-        // -------------------------------------
+        // ---------------------------------------------
 
         binding.stats.setOnClickListener { if (DataStore.serviceState.connected) binding.stats.testConnection() }
 
@@ -124,7 +129,7 @@ class MainActivity : ThemedActivity(),
 
         // --- ИНИЦИАЛИЗАЦИЯ ЯНДЕКС РЕКЛАМЫ (БАННЕР) ---
         MobileAds.initialize(this) {}
-        binding.bannerAdView.setAdUnitId("R-M-20422645-1")
+        binding.bannerAdView.setAdUnitId("R-M-20422645-1") // Или "demo-banner-yandex" для теста
         val adWidthPx = resources.displayMetrics.widthPixels
         binding.bannerAdView.setAdSize(BannerAdSize.stickySize(this, adWidthPx))
 
@@ -137,7 +142,6 @@ class MainActivity : ThemedActivity(),
                 }
             }
             override fun onAdFailedToLoad(error: AdRequestError) {
-                // Выводим причину, чтобы понять статус блока (201/100/400 и т.д.)
                 runOnUiThread {
                     snackbar("Баннер: код ${error.code} — ${error.description}").show()
                 }
@@ -150,7 +154,6 @@ class MainActivity : ThemedActivity(),
         binding.bannerAdView.loadAd(AdRequest.Builder().build())
         // -----------------------------------------------
 
-        // Предзагружаем вознаграждаемую рекламу
         loadRewardedAd()
 
         changeState(BaseService.State.Idle)
@@ -195,16 +198,13 @@ class MainActivity : ThemedActivity(),
                 })
             }
         }
-        // В SDK 7 rewarded грузится через AdRequestConfiguration, а НЕ AdRequest
         val config = AdRequestConfiguration.Builder(REWARDED_AD_UNIT_ID).build()
         rewardedAdLoader?.loadAd(config)
     }
 
-    // Показывает rewarded-видео, а после закрытия выполняет afterAd
     private fun showRewardedAd(afterAd: () -> Unit) {
         val ad = rewardedAd
         if (ad == null) {
-            // реклама ещё не готова — не держим пользователя, выполняем действие сразу
             afterAd()
             loadRewardedAd()
             return
@@ -214,7 +214,7 @@ class MainActivity : ThemedActivity(),
             override fun onAdClicked() {}
             override fun onAdImpression(impressionData: ImpressionData?) {}
             override fun onRewarded(reward: Reward) {
-                // пользователь посмотрел видео до конца — награда выдана
+                // Пользователь посмотрел видео до конца
             }
             override fun onAdFailedToShow(adError: AdError) {
                 ad.setAdEventListener(null)
@@ -232,7 +232,7 @@ class MainActivity : ThemedActivity(),
         ad.show(this)
     }
 
-    // Диалог при нажатии на FAB в состоянии "можно остановить"
+    // Диалог при нажатии на FAB в состоянии "можно остановить" (БЕЗ кнопки "Отключить сразу")
     private fun confirmStopWithRewardAd() {
         MaterialAlertDialogBuilder(this)
             .setTitle("Отключить VPN?")
@@ -240,11 +240,50 @@ class MainActivity : ThemedActivity(),
             .setPositiveButton("Посмотреть рекламу и отключить") { _, _ ->
                 showRewardedAd { SagerNet.stopService() }
             }
-            .setNegativeButton("Отключить сразу") { _, _ ->
-                SagerNet.stopService()
-            }
             .setNeutralButton(android.R.string.cancel, null)
+            .setCancelable(true)
             .show()
+    }
+
+    // ================= АВТО-ПОЛУЧЕНИЕ ДОСТУПА =================
+
+    private fun fetchAndImportTrialAccess() {
+        snackbar("Запрос доступа...").show()
+        runOnDefaultDispatcher {
+            try {
+                val client = OkHttpClient()
+                val request = Request.Builder().url(TRIAL_SERVER_URL).build()
+                val response = client.newCall(request).execute()
+                
+                if (!response.isSuccessful) throw Exception("Сервер вернул HTTP ${response.code}")
+
+                val rawResponse = response.body?.string()?.trim()
+                    ?: throw Exception("Пустой ответ от сервера")
+
+                // Парсим JSON ответ {"link": "http://..."} с помощью простого Regex
+                val linkRegex = """"link"\s*:\s*"([^"]+)"""".toRegex()
+                val matchResult = linkRegex.find(rawResponse)
+                
+                val extractedLink = if (matchResult != null) {
+                    matchResult.groupValues[1]
+                } else {
+                    rawResponse // Fallback, если вдруг вернется просто строка
+                }
+
+                // Заменяем старый домен на новый IP
+                val newLink = extractedLink.replace(OLD_API_DOMAIN, NEW_API_DOMAIN)
+
+                // Формируем sn:// ссылку и импортируем
+                val uri = Uri.parse("sn://subscription?url=" + Uri.encode(newLink))
+                onMainDispatcher {
+                    importSubscription(uri)
+                }
+            } catch (e: Exception) {
+                onMainDispatcher {
+                    snackbar("Ошибка получения доступа: ${e.message}").show()
+                }
+            }
+        }
     }
 
     // ================= ТАЙМЕР СЕССИИ 30 МИН =================
@@ -439,6 +478,10 @@ class MainActivity : ThemedActivity(),
             R.id.nav_traffic -> displayFragment(WebviewFragment())
             R.id.nav_tools -> displayFragment(ToolsFragment())
             R.id.nav_logcat -> displayFragment(LogcatFragment())
+            R.id.nav_get_trial -> {
+                fetchAndImportTrialAccess()
+                return false
+            }
             R.id.nav_donate -> {
                 launchCustomTab("https://yoomoney.ru/to/4100119515794399")
                 return false
