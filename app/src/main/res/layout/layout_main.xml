@@ -18,18 +18,11 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
-        <com.google.android.material.progressindicator.CircularProgressIndicator
+        <androidx.coordinatorlayout.widget.CoordinatorLayout
             android:id="@+id/fabProgress"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:max="1"
-            android:visibility="invisible"
-            app:indicatorColor="?colorMaterial100"
-            app:layout_anchor="@+id/fab"
-            app:layout_anchorGravity="center"
-            app:layout_behavior="io.nekohasekai.sagernet.widget.FabProgressBehavior"
-            app:trackCornerRadius="@dimen/mtrl_progress_track_thickness"
-            app:trackThickness="8dp" />
+            android:visibility="invisible" />
 
         <io.nekohasekai.sagernet.widget.ServiceButton
             android:id="@+id/fab"
@@ -42,12 +35,27 @@
             app:pressedTranslationZ="6dp"
             app:srcCompat="@drawable/ic_service_idle" />
 
+        <!-- 👇 НОВАЯ КНОПКА "ПОЛУЧИТЬ ДОСТУП" — слева от самолётика, над панелью скорости 👇 -->
+        <com.google.android.material.floatingactionbutton.FloatingActionButton
+            android:id="@+id/fabTrial"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+            android:contentDescription="Получить доступ"
+            android:elevation="6dp"
+            app:backgroundTint="?colorPrimary"
+            app:layout_anchor="@id/stats"
+            app:layout_anchorGravity="top|start"
+            app:srcCompat="@drawable/ic_baseline_card_giftcard_24"
+            app:tint="@android:color/white" />
+        <!-- 👆 КОНЕЦ НОВОЙ КНОПКИ 👆 -->
+
         <io.nekohasekai.sagernet.widget.StatsBar
             android:id="@+id/stats"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_gravity="bottom"
-            android:layout_marginBottom="80dp"
+            android:layout_marginBottom="50dp"
             android:nextFocusUp="@+id/fab"
             app:backgroundTint="?colorMaterial300"
             app:contentInsetStart="0dp"
@@ -65,7 +73,6 @@
                     android:id="@+id/tx"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_columnWeight="1"
                     android:layout_gravity="fill_horizontal"
                     android:ellipsize="marquee"
                     android:singleLine="true"
@@ -76,7 +83,6 @@
                     android:id="@+id/rx"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_columnWeight="1"
                     android:layout_gravity="fill_horizontal"
                     android:ellipsize="marquee"
                     android:singleLine="true"
