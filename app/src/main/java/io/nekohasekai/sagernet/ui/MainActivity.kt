@@ -23,11 +23,13 @@ import com.yandex.mobile.ads.banner.BannerAdEventListener
 import com.yandex.mobile.ads.banner.BannerAdSize
 import com.yandex.mobile.ads.common.AdRequest
 import com.yandex.mobile.ads.common.AdRequestError
+import com.yandex.mobile.ads.common.AdShowError
 import com.yandex.mobile.ads.common.ImpressionData
 import com.yandex.mobile.ads.common.MobileAds
 import com.yandex.mobile.ads.common.Reward
 import com.yandex.mobile.ads.rewarded.RewardedAd
 import com.yandex.mobile.ads.rewarded.RewardedAdEventListener
+import com.yandex.mobile.ads.rewarded.RewardedAdLoadListener
 import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.GroupType
 import io.nekohasekai.sagernet.Key
@@ -163,27 +165,35 @@ class MainActivity : ThemedActivity(),
         }
     }
 
-    // --- ЛОГИКА ВОЗНАГРАЖДАЕМОЙ РЕКЛАМЫ (SDK 7) ---
+    // --- ЛОГИКА ВОЗНАГРАЖДАЕМОЙ РЕКЛАМЫ (Yandex SDK 7) ---
     private fun initRewardedAd() {
-        rewardedAd = RewardedAd(this).apply {
-            setAdUnitId(REWARDED_AD_UNIT_ID)
-            setAdEventListener(object : RewardedAdEventListener {
-                override fun onLoaded() {}
-                override fun onAdFailedToLoad(error: AdRequestError) {}
-                override fun onAdShown() {}
-                override fun onAdClicked() {}
-                override fun onLeftApplication() {}
-                override fun onReturnedToApplication() {}
-                override fun onImpression(impressionData: ImpressionData?) {}
+        RewardedAd.load(
+            this,
+            REWARDED_AD_UNIT_ID,
+            AdRequest.Builder().build(),
+            object : RewardedAdLoadListener {
+                override fun onAdLoaded(ad: RewardedAd) {
+                    rewardedAd = ad
+                    rewardedAd?.adEventListener = object : RewardedAdEventListener {
+                        override fun onAdShown() {}
+                        override fun onAdFailedToShow(adShowError: AdShowError) {}
+                        override fun onAdClicked() {}
+                        override fun onAdDismissed() {}
+                        override fun onImpression(impressionData: ImpressionData?) {}
 
-                override fun onRewarded(reward: Reward) {
-                    snackbar("Спасибо! Добавлено 30 минут.").show()
-                    connect.launch(null)
-                    startSessionTimer()
+                        override fun onRewarded(reward: Reward) {
+                            snackbar("Спасибо! Добавлено 30 минут.").show()
+                            connect.launch(null)
+                            startSessionTimer()
+                        }
+                    }
                 }
-            })
-            loadAd(AdRequest.Builder().build())
-        }
+
+                override fun onAdFailedToLoad(adRequestError: AdRequestError) {
+                    // Реклама не загрузилась. Можно добавить логирование при необходимости
+                }
+            }
+        )
     }
 
     private fun showRewardedAdDialog() {
@@ -499,4 +509,4 @@ class MainActivity : ThemedActivity(),
         val fragment = supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
         return fragment != null && fragment.onKeyDown(keyCode, event)
     }
-} // <-- ВОТ ЭТА СКОБКА БЫЛА ПРОПУЩЕНА РАНЬШЕ
+}
