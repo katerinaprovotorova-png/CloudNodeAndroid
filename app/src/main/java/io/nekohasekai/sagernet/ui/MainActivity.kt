@@ -21,10 +21,17 @@ import com.google.android.material.navigation.NavigationView
 import com.google.android.material.snackbar.Snackbar
 import com.yandex.mobile.ads.banner.BannerAdEventListener
 import com.yandex.mobile.ads.banner.BannerAdSize
+import com.yandex.mobile.ads.common.AdError
 import com.yandex.mobile.ads.common.AdRequest
+import com.yandex.mobile.ads.common.AdRequestConfiguration
 import com.yandex.mobile.ads.common.AdRequestError
 import com.yandex.mobile.ads.common.ImpressionData
 import com.yandex.mobile.ads.common.MobileAds
+import com.yandex.mobile.ads.rewarded.Reward
+import com.yandex.mobile.ads.rewarded.RewardedAd
+import com.yandex.mobile.ads.rewarded.RewardedAdEventListener
+import com.yandex.mobile.ads.rewarded.RewardedAdLoader
+import com.yandex.mobile.ads.rewarded.RewardedAdLoadListener
 import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.GroupType
 import io.nekohasekai.sagernet.Key
@@ -70,6 +77,11 @@ class MainActivity : ThemedActivity(),
     lateinit var navigation: NavigationView
 
     private var sessionTimerJob: Job? = null
+    private var rewardedAdLoader: RewardedAdLoader? = null
+    private var rewardedAd: RewardedAd? = null
+
+    // ⚠️ ID вознаграждаемого блока из кабинета (для теста можно "demo-rewarded-yandex")
+    private val REWARDED_AD_UNIT_ID = "R-M-20422645-2"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -96,13 +108,20 @@ class MainActivity : ThemedActivity(),
             }
         }
 
+        // --- ВЫКЛЮЧЕНИЕ VPN ЧЕРЕЗ РЕКЛАМУ ---
         binding.fab.setOnClickListener {
-            if (DataStore.serviceState.canStop) SagerNet.stopService() else connect.launch(null)
+            if (DataStore.serviceState.canStop) {
+                confirmStopWithRewardAd()
+            } else {
+                connect.launch(null)
+            }
         }
+        // -------------------------------------
+
         binding.stats.setOnClickListener { if (DataStore.serviceState.connected) binding.stats.testConnection() }
 
         setContentView(binding.root)
-        
+
         // --- ИНИЦИАЛИЗАЦИЯ ЯНДЕКС РЕКЛАМЫ (БАННЕР) ---
         MobileAds.initialize(this) {}
         binding.bannerAdView.setAdUnitId("R-M-20422645-1")
@@ -113,12 +132,16 @@ class MainActivity : ThemedActivity(),
             override fun onAdLoaded() {
                 binding.bannerAdView.post {
                     val lp = binding.stats.layoutParams as CoordinatorLayout.LayoutParams
-                    val bannerHeight = binding.bannerAdView.height
-                    lp.bottomMargin = bannerHeight + 8
+                    lp.bottomMargin = binding.bannerAdView.height + 8
                     binding.stats.layoutParams = lp
                 }
             }
-            override fun onAdFailedToLoad(error: AdRequestError) {}
+            override fun onAdFailedToLoad(error: AdRequestError) {
+                // Выводим причину, чтобы понять статус блока (201/100/400 и т.д.)
+                runOnUiThread {
+                    snackbar("Баннер: код ${error.code} — ${error.description}").show()
+                }
+            }
             override fun onAdClicked() {}
             override fun onLeftApplication() {}
             override fun onReturnedToApplication() {}
@@ -126,6 +149,9 @@ class MainActivity : ThemedActivity(),
         })
         binding.bannerAdView.loadAd(AdRequest.Builder().build())
         // -----------------------------------------------
+
+        // Предзагружаем вознаграждаемую рекламу
+        loadRewardedAd()
 
         changeState(BaseService.State.Idle)
         connection.connect(this, this)
@@ -154,6 +180,75 @@ class MainActivity : ThemedActivity(),
         }
     }
 
+    // ================= ВОЗНАГРАЖДАЕМАЯ РЕКЛАМА (SDK 7) =================
+
+    private fun loadRewardedAd() {
+        if (rewardedAdLoader == null) {
+            rewardedAdLoader = RewardedAdLoader(this).apply {
+                setAdLoadListener(object : RewardedAdLoadListener {
+                    override fun onAdLoaded(ad: RewardedAd) {
+                        rewardedAd = ad
+                    }
+                    override fun onAdFailedToLoad(adRequestError: AdRequestError) {
+                        // реклама не загрузилась — не критично
+                    }
+                })
+            }
+        }
+        // В SDK 7 rewarded грузится через AdRequestConfiguration, а НЕ AdRequest
+        val config = AdRequestConfiguration.Builder(REWARDED_AD_UNIT_ID).build()
+        rewardedAdLoader?.loadAd(config)
+    }
+
+    // Показывает rewarded-видео, а после закрытия выполняет afterAd
+    private fun showRewardedAd(afterAd: () -> Unit) {
+        val ad = rewardedAd
+        if (ad == null) {
+            // реклама ещё не готова — не держим пользователя, выполняем действие сразу
+            afterAd()
+            loadRewardedAd()
+            return
+        }
+        ad.setAdEventListener(object : RewardedAdEventListener {
+            override fun onAdShown() {}
+            override fun onAdClicked() {}
+            override fun onAdImpression(impressionData: ImpressionData?) {}
+            override fun onRewarded(reward: Reward) {
+                // пользователь посмотрел видео до конца — награда выдана
+            }
+            override fun onAdFailedToShow(adError: AdError) {
+                ad.setAdEventListener(null)
+                rewardedAd = null
+                afterAd()
+                loadRewardedAd()
+            }
+            override fun onAdDismissed() {
+                ad.setAdEventListener(null)
+                rewardedAd = null
+                afterAd()
+                loadRewardedAd()
+            }
+        })
+        ad.show(this)
+    }
+
+    // Диалог при нажатии на FAB в состоянии "можно остановить"
+    private fun confirmStopWithRewardAd() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Отключить VPN?")
+            .setMessage("Посмотрите короткое видео, чтобы отключить соединение. Это поддержит работу сервиса.")
+            .setPositiveButton("Посмотреть рекламу и отключить") { _, _ ->
+                showRewardedAd { SagerNet.stopService() }
+            }
+            .setNegativeButton("Отключить сразу") { _, _ ->
+                SagerNet.stopService()
+            }
+            .setNeutralButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    // ================= ТАЙМЕР СЕССИИ 30 МИН =================
+
     private fun showSessionLimitDialog() {
         MaterialAlertDialogBuilder(this)
             .setTitle("⏱ Лимит бесплатной сессии")
@@ -169,15 +264,16 @@ class MainActivity : ThemedActivity(),
     private fun startSessionTimer() {
         sessionTimerJob?.cancel()
         sessionTimerJob = MainScope().launch {
-            // 30 минут = 30 * 60 * 1000L. Для теста можно поставить 60 * 1000L (1 минута)
-            delay(30 * 60 * 1000L) 
-            
+            // 30 минут. Для теста можно поставить 60 * 1000L (1 минута)
+            delay(30 * 60 * 1000L)
             if (DataStore.serviceState.canStop) {
                 SagerNet.stopService()
                 showSessionLimitDialog()
             }
         }
     }
+
+    // ===============================================================
 
     fun refreshNavMenu(clashApi: Boolean) {
         if (::navigation.isInitialized) {
@@ -358,7 +454,7 @@ class MainActivity : ThemedActivity(),
         DataStore.serviceState = state
         binding.fab.changeState(state, DataStore.serviceState, animate)
         binding.stats.changeState(state)
-        
+
         if (state == BaseService.State.Connected) {
             startSessionTimer()
         } else {
