@@ -38,25 +38,15 @@
             android:id="@+id/nav_tools"
             android:icon="@drawable/baseline_construction_24"
             android:title="@string/menu_tools" />
-            
-        <!-- 👇 НОВЫЙ ПУНКТ МЕНЮ "ПОЛУЧИТЬ ДОСТУП" 👇 -->
-        <item
-            android:id="@+id/nav_get_trial"
-            android:icon="@drawable/ic_baseline_card_giftcard_24"
-            android:title="Получить доступ" />
-        <!-- 👆 КОНЕЦ ДОБАВЛЕНИЯ 👆 -->
-        
     </group>
 
     <group
         android:id="@+id/about"
         android:checkableBehavior="single">
-            
         <item
             android:id="@+id/nav_donate"
             android:icon="@drawable/ic_baseline_card_giftcard_24"
             android:title="Пожертвовать" />
-            
         <item
             android:id="@+id/nav_about"
             android:icon="@drawable/ic_baseline_info_24"
