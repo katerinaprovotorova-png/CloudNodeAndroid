@@ -21,16 +21,10 @@ import com.google.android.material.navigation.NavigationView
 import com.google.android.material.snackbar.Snackbar
 import com.yandex.mobile.ads.banner.BannerAdEventListener
 import com.yandex.mobile.ads.banner.BannerAdSize
-import com.yandex.mobile.ads.common.AdError
 import com.yandex.mobile.ads.common.AdRequest
 import com.yandex.mobile.ads.common.AdRequestError
 import com.yandex.mobile.ads.common.ImpressionData
 import com.yandex.mobile.ads.common.MobileAds
-import com.yandex.mobile.ads.common.Reward
-import com.yandex.mobile.ads.rewarded.RewardedAd
-import com.yandex.mobile.ads.rewarded.RewardedAdEventListener
-import com.yandex.mobile.ads.rewarded.RewardedAdLoader
-import com.yandex.mobile.ads.rewarded.RewardedAdLoadListener
 import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.GroupType
 import io.nekohasekai.sagernet.Key
@@ -76,11 +70,6 @@ class MainActivity : ThemedActivity(),
     lateinit var navigation: NavigationView
 
     private var sessionTimerJob: Job? = null
-    private var rewardedAd: RewardedAd? = null
-    private var rewardedAdLoader: RewardedAdLoader? = null
-    
-    // ⚠️ ЗАМЕНИ ЭТОТ ID НА СВОЙ РЕАЛЬНЫЙ ID ВОЗНАГРАЖДАЕМОЙ РЕКЛАМЫ ИЗ КАБИНЕТА ЯНДЕКСА
-    private val REWARDED_AD_UNIT_ID = "R-M-20422645-2" 
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -138,8 +127,6 @@ class MainActivity : ThemedActivity(),
         binding.bannerAdView.loadAd(AdRequest.Builder().build())
         // -----------------------------------------------
 
-        initRewardedAd()
-
         changeState(BaseService.State.Idle)
         connection.connect(this, this)
         DataStore.configurationStore.registerChangeListener(this)
@@ -167,63 +154,11 @@ class MainActivity : ThemedActivity(),
         }
     }
 
-    // --- ЛОГИКА ВОЗНАГРАЖДАЕМОЙ РЕКЛАМЫ (Yandex SDK 7) ---
-    private fun initRewardedAd() {
-        rewardedAdLoader = RewardedAdLoader(this)
-        val adRequest = AdRequest.Builder(REWARDED_AD_UNIT_ID).build()
-        
-        rewardedAdLoader?.loadAd(adRequest, object : RewardedAdLoadListener {
-            override fun onAdLoaded(ad: RewardedAd) {
-                rewardedAd = ad
-            }
-
-            override fun onAdFailedToLoad(adRequestError: AdRequestError) {
-                // Реклама не загрузилась. Можно добавить логирование при необходимости
-            }
-        })
-    }
-
-    private fun showRewardedAdDialog() {
+    private fun showSessionLimitDialog() {
         MaterialAlertDialogBuilder(this)
             .setTitle("⏱ Лимит бесплатной сессии")
-            .setMessage("Бесплатное время истекло. Посмотрите короткое видео, чтобы получить еще 30 минут работы VPN.")
-            .setPositiveButton("Посмотреть рекламу") { _, _ ->
-                if (rewardedAd != null) {
-                    rewardedAd?.apply {
-                        setAdEventListener(object : RewardedAdEventListener {
-                            override fun onAdShown() {}
-                            
-                            override fun onAdFailedToShow(adError: AdError) {
-                                rewardedAd?.setAdEventListener(null)
-                                rewardedAd = null
-                                snackbar("Ошибка показа рекламы").show()
-                                initRewardedAd()
-                            }
-                            
-                            override fun onAdDismissed() {
-                                rewardedAd?.setAdEventListener(null)
-                                rewardedAd = null
-                                initRewardedAd() // Загружаем следующую рекламу после закрытия
-                            }
-                            
-                            override fun onAdClicked() {}
-                            
-                            override fun onAdImpression(impressionData: ImpressionData?) {}
-                            
-                            override fun onRewarded(reward: Reward) {
-                                snackbar("Спасибо! Добавлено 30 минут.").show()
-                                connect.launch(null)
-                                startSessionTimer()
-                            }
-                        })
-                        show(this@MainActivity)
-                    }
-                } else {
-                    snackbar("Реклама загружается, попробуйте через пару секунд...").show()
-                    initRewardedAd()
-                }
-            }
-            .setNegativeButton("Просто переподключить") { _, _ ->
+            .setMessage("Бесплатное время (30 минут) истекло. Нажмите кнопку ниже, чтобы продолжить работу.")
+            .setPositiveButton("Продолжить") { _, _ ->
                 connect.launch(null)
                 startSessionTimer()
             }
@@ -239,11 +174,10 @@ class MainActivity : ThemedActivity(),
             
             if (DataStore.serviceState.canStop) {
                 SagerNet.stopService()
-                showRewardedAdDialog()
+                showSessionLimitDialog()
             }
         }
     }
-    // -----------------------------------------------
 
     fun refreshNavMenu(clashApi: Boolean) {
         if (::navigation.isInitialized) {
@@ -503,11 +437,6 @@ class MainActivity : ThemedActivity(),
         GroupManager.userInterface = null
         DataStore.configurationStore.unregisterChangeListener(this)
         connection.disconnect(this)
-        
-        // Очистка ресурсов рекламы для предотвращения утечек памяти
-        rewardedAd?.setAdEventListener(null)
-        rewardedAd = null
-        rewardedAdLoader = null
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
