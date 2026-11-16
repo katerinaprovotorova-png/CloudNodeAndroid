@@ -72,7 +72,6 @@ class MainActivity : ThemedActivity(),
     lateinit var binding: LayoutMainBinding
     lateinit var navigation: NavigationView
 
-    // Переменные для таймера сессии и вознаграждаемой рекламы
     private var sessionTimerJob: Job? = null
     private var rewardedAd: RewardedAd? = null
     
@@ -126,9 +125,7 @@ class MainActivity : ThemedActivity(),
                     binding.stats.layoutParams = lp
                 }
             }
-            override fun onAdFailedToLoad(error: AdRequestError) {
-                // Если баннер не загрузился, оставляем страховочный отступ из XML (80dp)
-            }
+            override fun onAdFailedToLoad(error: AdRequestError) {}
             override fun onAdClicked() {}
             override fun onLeftApplication() {}
             override fun onReturnedToApplication() {}
@@ -137,7 +134,6 @@ class MainActivity : ThemedActivity(),
         binding.bannerAdView.loadAd(AdRequest.Builder().build())
         // -----------------------------------------------
 
-        // Инициализируем вознаграждаемую рекламу (строго по API SDK 7)
         initRewardedAd()
 
         changeState(BaseService.State.Idle)
@@ -172,14 +168,8 @@ class MainActivity : ThemedActivity(),
         rewardedAd = RewardedAd(this).apply {
             setAdUnitId(REWARDED_AD_UNIT_ID)
             setAdEventListener(object : RewardedAdEventListener {
-                override fun onLoaded() {
-                    // Реклама загружена и готова к показу
-                }
-
-                override fun onAdFailedToLoad(error: AdRequestError) {
-                    // Ошибка загрузки (например, нет интернета или блок на модерации)
-                }
-
+                override fun onLoaded() {}
+                override fun onAdFailedToLoad(error: AdRequestError) {}
                 override fun onAdShown() {}
                 override fun onAdClicked() {}
                 override fun onLeftApplication() {}
@@ -187,13 +177,11 @@ class MainActivity : ThemedActivity(),
                 override fun onImpression(impressionData: ImpressionData?) {}
 
                 override fun onRewarded(reward: Reward) {
-                    // ПОЛЬЗОВАТЕЛЬ ПОСМОТРЕЛ РЕКЛАМУ ДО КОНЦА!
                     snackbar("Спасибо! Добавлено 30 минут.").show()
-                    connect.launch(null) // Переподключаем VPN
-                    startSessionTimer()  // Перезапускаем таймер
+                    connect.launch(null)
+                    startSessionTimer()
                 }
             })
-            // В SDK 7 AdRequest.Builder() не принимает аргументов, ID задается через setAdUnitId выше
             loadAd(AdRequest.Builder().build())
         }
     }
@@ -207,28 +195,25 @@ class MainActivity : ThemedActivity(),
                     rewardedAd?.show(this)
                 } else {
                     snackbar("Реклама загружается, попробуйте через пару секунд...").show()
-                    initRewardedAd() // Пробуем загрузить заново
+                    initRewardedAd()
                 }
             }
             .setNegativeButton("Просто переподключить") { _, _ ->
-                // Запасной вариант, чтобы пользователь не злился, если реклама не грузится
                 connect.launch(null)
                 startSessionTimer()
             }
-            .setCancelable(false) // Запрещаем закрывать окно нажатием вне его
+            .setCancelable(false)
             .show()
     }
 
     private fun startSessionTimer() {
         sessionTimerJob?.cancel()
         sessionTimerJob = MainScope().launch {
-            // 30 минут = 30 * 60 * 1000 миллисекунд. 
-            // ⚠️ ДЛЯ ТЕСТА МОЖЕШЬ ВРЕМЕННО ПОСТАВИТЬ 60 * 1000L (1 минута)
+            // 30 минут = 30 * 60 * 1000L. Для теста можно поставить 60 * 1000L (1 минута)
             delay(30 * 60 * 1000L) 
             
             if (DataStore.serviceState.canStop) {
-                SagerNet.stopService() // Мягко отключаем VPN
-                // После delay корутина автоматически возобновляется в Main потоке
+                SagerNet.stopService()
                 showRewardedAdDialog()
             }
         }
@@ -415,7 +400,6 @@ class MainActivity : ThemedActivity(),
         binding.fab.changeState(state, DataStore.serviceState, animate)
         binding.stats.changeState(state)
         
-        // УПРАВЛЕНИЕ ТАЙМЕРОМ ПРИ СМЕНЕ СОСТОЯНИЯ
         if (state == BaseService.State.Connected) {
             startSessionTimer()
         } else {
@@ -515,3 +499,4 @@ class MainActivity : ThemedActivity(),
         val fragment = supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
         return fragment != null && fragment.onKeyDown(keyCode, event)
     }
+} // <-- ВОТ ЭТА СКОБКА БЫЛА ПРОПУЩЕНА РАНЬШЕ
