@@ -82,8 +82,7 @@ class MainActivity : ThemedActivity(),
     private var rewardedAdLoader: RewardedAdLoader? = null
     private var rewardedAd: RewardedAd? = null
 
-    // ⚠️ НАСТРОЙКИ API И РЕКЛАМЫ
-    private val REWARDED_AD_UNIT_ID = "demo-rewarded-yandex" // Замени на "R-M-20422645-2" после активации
+    private val REWARDED_AD_UNIT_ID = "demo-rewarded-yandex" 
     private val TRIAL_SERVER_URL = "http://157.228.118.129:8081/get_trial"
     private val OLD_API_DOMAIN = "misteria.fvds.ru"
     private val NEW_API_DOMAIN = "157.228.118.129"
@@ -113,20 +112,17 @@ class MainActivity : ThemedActivity(),
             }
         }
 
-        // --- ВЫКЛЮЧЕНИЕ VPN ТОЛЬКО ЧЕРЕЗ РЕКЛАМУ ---
+        // --- ЛОГИКА КНОПКИ САМОЛЁТИКА ---
         binding.fab.setOnClickListener {
             if (DataStore.serviceState.canStop) {
+                // Если включен -> предлагаем отключить через рекламу
                 confirmStopWithRewardAd()
             } else {
-                connect.launch(null)
+                // Если выключен -> проверяем, нужен ли триал, и подключаем
+                checkAndConnectTrialIfNeeded()
             }
         }
-
-        // 👇 НОВАЯ КНОПКА "ПОЛУЧИТЬ ДОСТУП" НАД САМОЛЁТИКОМ 👇
-        binding.fabTrial.setOnClickListener {
-            fetchAndImportTrialAccess()
-        }
-        // ---------------------------------------------
+        // --------------------------------
 
         binding.stats.setOnClickListener { if (DataStore.serviceState.connected) binding.stats.testConnection() }
 
@@ -134,7 +130,7 @@ class MainActivity : ThemedActivity(),
 
         // --- ИНИЦИАЛИЗАЦИЯ ЯНДЕКС РЕКЛАМЫ (БАННЕР) ---
         MobileAds.initialize(this) {}
-        binding.bannerAdView.setAdUnitId("R-M-20422645-1") // Или "demo-banner-yandex" для теста
+        binding.bannerAdView.setAdUnitId("R-M-20422645-1")
         val adWidthPx = resources.displayMetrics.widthPixels
         binding.bannerAdView.setAdSize(BannerAdSize.stickySize(this, adWidthPx))
 
@@ -147,9 +143,7 @@ class MainActivity : ThemedActivity(),
                 }
             }
             override fun onAdFailedToLoad(error: AdRequestError) {
-                runOnUiThread {
-                    snackbar("Баннер: код ${error.code} — ${error.description}").show()
-                }
+                runOnUiThread { snackbar("Баннер: код ${error.code} — ${error.description}").show() }
             }
             override fun onAdClicked() {}
             override fun onLeftApplication() {}
@@ -188,18 +182,14 @@ class MainActivity : ThemedActivity(),
         }
     }
 
-    // ================= ВОЗНАГРАЖДАЕМАЯ РЕКЛАМА (SDK 7) =================
+    // ================= ВОЗНАГРАЖДАЕМАЯ РЕКЛАМА =================
 
     private fun loadRewardedAd() {
         if (rewardedAdLoader == null) {
             rewardedAdLoader = RewardedAdLoader(this).apply {
                 setAdLoadListener(object : RewardedAdLoadListener {
-                    override fun onAdLoaded(ad: RewardedAd) {
-                        rewardedAd = ad
-                    }
-                    override fun onAdFailedToLoad(adRequestError: AdRequestError) {
-                        // реклама не загрузилась — не критично
-                    }
+                    override fun onAdLoaded(ad: RewardedAd) { rewardedAd = ad }
+                    override fun onAdFailedToLoad(adRequestError: AdRequestError) {}
                 })
             }
         }
@@ -218,26 +208,17 @@ class MainActivity : ThemedActivity(),
             override fun onAdShown() {}
             override fun onAdClicked() {}
             override fun onAdImpression(impressionData: ImpressionData?) {}
-            override fun onRewarded(reward: Reward) {
-                // Пользователь посмотрел видео до конца
-            }
+            override fun onRewarded(reward: Reward) {}
             override fun onAdFailedToShow(adError: AdError) {
-                ad.setAdEventListener(null)
-                rewardedAd = null
-                afterAd()
-                loadRewardedAd()
+                ad.setAdEventListener(null); rewardedAd = null; afterAd(); loadRewardedAd()
             }
             override fun onAdDismissed() {
-                ad.setAdEventListener(null)
-                rewardedAd = null
-                afterAd()
-                loadRewardedAd()
+                ad.setAdEventListener(null); rewardedAd = null; afterAd(); loadRewardedAd()
             }
         })
         ad.show(this)
     }
 
-    // Диалог при нажатии на FAB в состоянии "можно остановить" (БЕЗ кнопки "Отключить сразу")
     private fun confirmStopWithRewardAd() {
         MaterialAlertDialogBuilder(this)
             .setTitle("Отключить VPN?")
@@ -250,10 +231,32 @@ class MainActivity : ThemedActivity(),
             .show()
     }
 
-    // ================= АВТО-ПОЛУЧЕНИЕ ДОСТУПА (БЕЗ ДИАЛОГА) =================
+    // ================= УМНОЕ ПОДКЛЮЧЕНИЕ (ПРОВЕРКА ТРИАЛА) =================
 
-    private fun fetchAndImportTrialAccess() {
-        snackbar("Запрос доступа...").show()
+    private fun checkAndConnectTrialIfNeeded() {
+        // Ищем существующую триал-группу
+        val existingGroup = GroupManager.getGroups().firstOrNull { 
+            it.name == "CloudNode Trial" && it.type == GroupType.SUBSCRIPTION 
+        }
+        
+        val profiles = existingGroup?.let { ProfileManager.getProfiles(it.id) } ?: emptyList()
+
+        if (existingGroup != null && profiles.isNotEmpty()) {
+            // Триал уже есть и профили загружены -> просто подключаем
+            DataStore.selectedGroup = existingGroup.id
+            DataStore.selectedProxy = profiles.first().id
+            DataStore.currentProfile = profiles.first().id
+            connect.launch(null)
+        } else {
+            // Триала нет или профили не загрузились -> получаем с сервера
+            fetchAndConnectTrial()
+        }
+    }
+
+    private fun fetchAndConnectTrial() {
+        snackbar("Получение бесплатного доступа...").show()
+        binding.fab.isEnabled = false // Блокируем повторные нажатия
+
         runOnDefaultDispatcher {
             try {
                 val client = OkHttpClient()
@@ -262,37 +265,47 @@ class MainActivity : ThemedActivity(),
 
                 if (!response.isSuccessful) throw Exception("Сервер вернул HTTP ${response.code}")
 
-                val rawResponse = response.body?.string()?.trim()
-                    ?: throw Exception("Пустой ответ от сервера")
-
-                // Парсим JSON ответ {"link": "http://..."}
+                val rawResponse = response.body?.string()?.trim() ?: throw Exception("Пустой ответ")
                 val linkRegex = """"link"\s*:\s*"([^"]+)"""".toRegex()
-                val matchResult = linkRegex.find(rawResponse)
-                val extractedLink = matchResult?.groupValues?.get(1) ?: rawResponse
-
-                // Заменяем старый домен на новый IP
+                val extractedLink = linkRegex.find(rawResponse)?.groupValues?.get(1) ?: rawResponse
                 val newLink = extractedLink.replace(OLD_API_DOMAIN, NEW_API_DOMAIN)
 
-                // Тихое создание подписки без диалога подтверждения
-                val group = ProxyGroup(
-                    type = GroupType.SUBSCRIPTION,
-                    name = "CloudNode Trial"
-                )
-                val subscription = SubscriptionBean()
-                group.subscription = subscription
-                subscription.link = newLink
-
-                val createdGroup = GroupManager.createGroup(group)
-                GroupUpdater.startUpdate(createdGroup, true)
-                DataStore.selectedGroup = createdGroup.id
-
-                onMainDispatcher {
-                    snackbar("✅ Доступ получен! Нажмите самолётик для подключения.").show()
-                    displayFragmentWithId(R.id.nav_configuration)
+                // Создаем или обновляем группу
+                val existing = GroupManager.getGroups().firstOrNull { it.subscription?.link == newLink }
+                val targetGroup = if (existing != null) {
+                    GroupUpdater.startUpdate(existing, false)
+                    existing
+                } else {
+                    val group = ProxyGroup(type = GroupType.SUBSCRIPTION, name = "CloudNode Trial")
+                    val subscription = SubscriptionBean().apply { link = newLink }
+                    group.subscription = subscription
+                    GroupManager.createGroup(group).also { GroupUpdater.startUpdate(it, false) }
                 }
 
+                DataStore.selectedGroup = targetGroup.id
+
+                // Ждем загрузки профилей (до 15 сек)
+                var profiles: List<AbstractBean> = emptyList()
+                for (i in 0 until 30) {
+                    delay(500)
+                    profiles = ProfileManager.getProfiles(targetGroup.id)
+                    if (profiles.isNotEmpty()) break
+                }
+
+                onMainDispatcher {
+                    binding.fab.isEnabled = true
+                    if (profiles.isNotEmpty()) {
+                        DataStore.selectedProxy = profiles.first().id
+                        DataStore.currentProfile = profiles.first().id
+                        snackbar("✅ Доступ получен! Подключаем...").show()
+                        connect.launch(null) // ЗАПУСКАЕМ ПОДКЛЮЧЕНИЕ
+                    } else {
+                        snackbar("Ошибка: профили не получены с сервера").show()
+                    }
+                }
             } catch (e: Exception) {
                 onMainDispatcher {
+                    binding.fab.isEnabled = true
                     snackbar("Ошибка получения доступа: ${e.readableMessage}").show()
                 }
             }
@@ -316,8 +329,7 @@ class MainActivity : ThemedActivity(),
     private fun startSessionTimer() {
         sessionTimerJob?.cancel()
         sessionTimerJob = MainScope().launch {
-            // 30 минут. Для теста можно поставить 60 * 1000L (1 минута)
-            delay(30 * 60 * 1000L)
+            delay(30 * 60 * 1000L) // 30 минут
             if (DataStore.serviceState.canStop) {
                 SagerNet.stopService()
                 showSessionLimitDialog()
@@ -325,6 +337,8 @@ class MainActivity : ThemedActivity(),
         }
     }
 
+    // ===============================================================
+    // (Остальные стандартные методы импорта и навигации остаются без изменений)
     // ===============================================================
 
     fun refreshNavMenu(clashApi: Boolean) {
@@ -372,7 +386,6 @@ class MainActivity : ThemedActivity(),
                 return
             }
         }
-
         val name = group.name.takeIf { !it.isNullOrBlank() } ?: group.subscription?.link ?: group.subscription?.token
         if (name.isNullOrBlank()) return
         group.name = group.name.takeIf { !it.isNullOrBlank() } ?: ("Subscription #" + System.currentTimeMillis())
@@ -399,7 +412,6 @@ class MainActivity : ThemedActivity(),
             onMainDispatcher { alert(e.readableMessage).show() }
             return
         }
-
         onMainDispatcher {
             MaterialAlertDialogBuilder(this@MainActivity).setTitle(R.string.profile_import)
                 .setMessage(getString(R.string.profile_import_message, profile.displayName()))
@@ -433,20 +445,11 @@ class MainActivity : ThemedActivity(),
     }
 
     private fun showDownloadDialog(pluginEntry: PluginEntry) {
-        var index = 0
-        var playIndex = -1
-        var fdroidIndex = -1
+        var index = 0; var playIndex = -1; var fdroidIndex = -1
         val items = mutableListOf<String>()
-        if (pluginEntry.downloadSource.playStore) {
-            items.add(getString(R.string.install_from_play_store))
-            playIndex = index++
-        }
-        if (pluginEntry.downloadSource.fdroid) {
-            items.add(getString(R.string.install_from_fdroid))
-            fdroidIndex = index++
-        }
-        items.add(getString(R.string.download))
-        val downloadIndex = index
+        if (pluginEntry.downloadSource.playStore) { items.add(getString(R.string.install_from_play_store)); playIndex = index++ }
+        if (pluginEntry.downloadSource.fdroid) { items.add(getString(R.string.install_from_fdroid)); fdroidIndex = index++ }
+        items.add(getString(R.string.download)); val downloadIndex = index
 
         MaterialAlertDialogBuilder(this).setTitle(pluginEntry.name)
             .setItems(items.toTypedArray()) { _, which ->
@@ -455,8 +458,7 @@ class MainActivity : ThemedActivity(),
                     fdroidIndex -> launchCustomTab("https://f-droid.org/packages/${pluginEntry.packageName}/")
                     downloadIndex -> launchCustomTab(pluginEntry.downloadSource.downloadLink)
                 }
-            }
-            .show()
+            }.show()
     }
 
     override fun onNavigationItemSelected(item: MenuItem): Boolean {
@@ -476,9 +478,7 @@ class MainActivity : ThemedActivity(),
             binding.stats.performHide()
             binding.fab.hide()
         }
-        supportFragmentManager.beginTransaction()
-            .replace(R.id.fragment_holder, fragment)
-            .commitAllowingStateLoss()
+        supportFragmentManager.beginTransaction().replace(R.id.fragment_holder, fragment).commitAllowingStateLoss()
         binding.drawerLayout.closeDrawers()
     }
 
@@ -491,14 +491,7 @@ class MainActivity : ThemedActivity(),
             R.id.nav_traffic -> displayFragment(WebviewFragment())
             R.id.nav_tools -> displayFragment(ToolsFragment())
             R.id.nav_logcat -> displayFragment(LogcatFragment())
-            R.id.nav_get_trial -> {
-                fetchAndImportTrialAccess()
-                return false
-            }
-            R.id.nav_donate -> {
-                launchCustomTab("https://yoomoney.ru/to/4100119515794399")
-                return false
-            }
+            R.id.nav_donate -> { launchCustomTab("https://yoomoney.ru/to/4100119515794399"); return false }
             R.id.nav_about -> displayFragment(AboutFragment())
             else -> return false
         }
