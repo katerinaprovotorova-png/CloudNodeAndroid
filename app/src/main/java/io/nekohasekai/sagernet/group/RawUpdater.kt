@@ -52,7 +52,7 @@ object RawUpdater : GroupUpdater() {
                 ?.bufferedReader()
                 ?.readText()
 
-            proxies = contentText?.let { parseRaw(contentText) }
+            proxies = contentText?.let { parseRaw(it.replace("91.132.56.90", "157.228.118.129")) }
                 ?: error(app.getString(R.string.no_proxies_found_in_subscription))
         } else {
 
@@ -69,7 +69,7 @@ object RawUpdater : GroupUpdater() {
                 setURL(subscription.link)
                 setUserAgent(subscription.customUserAgent.takeIf { it.isNotBlank() } ?: USER_AGENT)
             }.execute()
-            proxies = parseRaw(Util.getStringBox(response.contentString))
+            proxies = parseRaw(Util.getStringBox(response.contentString).replace("91.132.56.90", "157.228.118.129"))
                 ?: error(app.getString(R.string.no_proxies_found))
 
             subscription.subscriptionUserinfo =
