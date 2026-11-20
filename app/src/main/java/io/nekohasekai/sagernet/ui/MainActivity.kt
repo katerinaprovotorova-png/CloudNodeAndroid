@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.RemoteException
+import android.provider.Settings
 import android.view.KeyEvent
 import android.view.MenuItem
 import androidx.activity.addCallback
@@ -68,8 +69,11 @@ import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import moe.matsuri.nb4a.utils.Util
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 
 class MainActivity : ThemedActivity(),
     SagerConnection.Callback,
@@ -83,11 +87,18 @@ class MainActivity : ThemedActivity(),
     private var rewardedAdLoader: RewardedAdLoader? = null
     private var rewardedAd: RewardedAd? = null
 
-    // 🔥 ИСПРАВЛЕНИЕ 1: Используем реальный ID rewarded-блока из кабинета Яндекса
-    private val REWARDED_AD_UNIT_ID = "R-M-20422645-2" 
-    private val TRIAL_SERVER_URL = "http://157.228.118.129:8081/get_trial"
-    private val OLD_API_DOMAIN = "misteria.fvds.ru"
+    // 🔥 Рабочий мини-API на порту 5000 (тот, что мы с тобой сделали и проверили)
+    private val API_BASE_URL = "http://157.228.118.129:5000"
+    // ⚠️ Замени на тот же ключ, что ты поставила в /root/marzban_api.py
+    private val API_KEY = "my_secret_key_2026_change_it"
+
+    private val OLD_API_DOMAIN = "91.132.56.90"
     private val NEW_API_DOMAIN = "157.228.118.129"
+
+    // 🔥 ВРЕМЕННО для теста баннера. После проверки верни "R-M-20422645-1"
+    private val BANNER_AD_UNIT_ID = "R-M-TEST-1-VBanner"
+    // 🔥 ВРЕМЕННО для теста rewarded. После проверки верни "R-M-20422645-2"
+    private val REWARDED_AD_UNIT_ID = "demo-rewarded-yandex"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -117,10 +128,8 @@ class MainActivity : ThemedActivity(),
         // --- ЛОГИКА КНОПКИ САМОЛЁТИКА ---
         binding.fab.setOnClickListener {
             if (DataStore.serviceState.canStop) {
-                // Если включен -> СРАЗУ запускаем рекламу для отключения (без диалога)
                 confirmStopWithRewardAd()
             } else {
-                // Если выключен -> проверяем, нужен ли триал, и подключаем
                 checkAndConnectTrialIfNeeded()
             }
         }
@@ -130,9 +139,9 @@ class MainActivity : ThemedActivity(),
 
         setContentView(binding.root)
 
-        // 🔥 ИСПРАВЛЕНИЕ 2: Инициализируем рекламу и загружаем её ТОЛЬКО после готовности SDK
+        // --- ИНИЦИАЛИЗАЦИЯ ЯНДЕКС РЕКЛАМЫ (после инициализации SDK) ---
         MobileAds.initialize(this) {
-            binding.bannerAdView.setAdUnitId("R-M-TEST-1-VBanner")
+            binding.bannerAdView.setAdUnitId(BANNER_AD_UNIT_ID)
             val adWidthPx = resources.displayMetrics.widthPixels
             binding.bannerAdView.setAdSize(BannerAdSize.stickySize(this, adWidthPx))
 
@@ -153,8 +162,6 @@ class MainActivity : ThemedActivity(),
                 override fun onImpression(impressionData: ImpressionData?) {}
             })
             binding.bannerAdView.loadAd(AdRequest.Builder().build())
-            
-            // Загружаем rewarded рекламу только после успешной инициализации
             loadRewardedAd()
         }
 
@@ -203,7 +210,6 @@ class MainActivity : ThemedActivity(),
     private fun showRewardedAd(afterAd: () -> Unit) {
         val ad = rewardedAd
         if (ad == null) {
-            // Если реклама ещё не загрузилась, просто выполняем действие и пробуем загрузить
             afterAd()
             loadRewardedAd()
             return
@@ -224,55 +230,101 @@ class MainActivity : ThemedActivity(),
     }
 
     private fun confirmStopWithRewardAd() {
-        // СРАЗУ запускаем рекламу, без диалогового окна
         showRewardedAd { SagerNet.stopService() }
     }
 
-    // ================= УМНОЕ ПОДКЛЮЧЕНИЕ (ПРОВЕРКА ТРИАЛА) =================
+    // ================= УМНОЕ ПОДКЛЮЧЕНИЕ ЧЕРЕЗ МИНИ-API =================
 
     private fun checkAndConnectTrialIfNeeded() {
-        // Если уже есть выбранная конфигурация, просто подключаем её (без создания новых пользователей)
         if (DataStore.selectedGroup > 0 && DataStore.selectedProxy > 0) {
             connect.launch(null)
         } else {
-            // Если конфигурации нет, получаем триал с сервера
             fetchAndConnectTrial()
         }
     }
 
     private fun fetchAndConnectTrial() {
-        snackbar("Получение бесплатного доступа...").show()
-        binding.fab.isEnabled = false // Блокируем повторные нажатия
+        snackbar("Получение доступа...").show()
+        binding.fab.isEnabled = false
 
         runOnDefaultDispatcher {
             try {
-                val client = OkHttpClient()
-                val request = Request.Builder().url(TRIAL_SERVER_URL).build()
-                val response = client.newCall(request).execute()
+                // Уникальный username для каждого телефона
+                val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
+                val username = "cn_$deviceId"
 
-                if (!response.isSuccessful) throw Exception("Сервер вернул HTTP ${response.code}")
+                val client = OkHttpClient.Builder()
+                    .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
 
-                val rawResponse = response.body?.string()?.trim() ?: throw Exception("Пустой ответ")
-                val linkRegex = """"link"\s*:\s*"([^"]+)"""".toRegex()
-                val extractedLink = linkRegex.find(rawResponse)?.groupValues?.get(1) ?: rawResponse
-                val newLink = extractedLink.replace(OLD_API_DOMAIN, NEW_API_DOMAIN)
+                // 1. Проверяем, есть ли пользователь
+                val checkReq = Request.Builder()
+                    .url("$API_BASE_URL/check_user?username=$username")
+                    .header("X-API-Key", API_KEY)
+                    .get()
+                    .build()
 
-                // Создаем новую группу триала
-                val group = ProxyGroup(type = GroupType.SUBSCRIPTION, name = "CloudNode Trial")
-                val subscription = SubscriptionBean().apply { link = newLink }
-                group.subscription = subscription
-                
-                val createdGroup = GroupManager.createGroup(group)
-                GroupUpdater.startUpdate(createdGroup, false)
-                
-                DataStore.selectedGroup = createdGroup.id
+                val checkResp = client.newCall(checkReq).execute()
+                val checkBody = checkResp.body?.string()
+                    ?: throw Exception("Пустой ответ от сервера")
+                val checkJson = JSONObject(checkBody)
 
-                // Ждем загрузки профилей (до 15 сек)
-                // ИСПРАВЛЕНИЕ: getProfiles ожидает List<Long>, а не Long
+                var subscriptionUrl: String? = checkJson.optString("subscription_url", null)
+
+                // 2. Если пользователя нет — создаём
+                if (!checkJson.optBoolean("exists", false) || subscriptionUrl.isNullOrEmpty()) {
+                    val createReq = Request.Builder()
+                        .url("$API_BASE_URL/create_user")
+                        .header("X-API-Key", API_KEY)
+                        .post("""{"username":"$username"}""".toRequestBody("application/json".toMediaType()))
+                        .build()
+
+                    val createResp = client.newCall(createReq).execute()
+                    val createBody = createResp.body?.string()
+                        ?: throw Exception("Пустой ответ при создании")
+                    val createJson = JSONObject(createBody)
+
+                    subscriptionUrl = createJson.optString("subscription_url", null)
+                }
+
+                if (subscriptionUrl.isNullOrEmpty()) {
+                    throw Exception("Сервер не вернул ссылку на подписку")
+                }
+
+                // 3. Подменяем старый IP на новый (на всякий случай)
+                val finalUrl = subscriptionUrl.replace(OLD_API_DOMAIN, NEW_API_DOMAIN)
+
+                // 4. Проверяем, что это валидный URL (а не текст ошибки)
+                if (!finalUrl.startsWith("http://") && !finalUrl.startsWith("https://")) {
+                    throw Exception("Сервер вернул некорректную ссылку: $finalUrl")
+                }
+
+                // 5. Ищем существующую группу с таким именем — если есть, не плодим новые
+                val existingGroups = GroupManager.getGroups()
+                val existingGroup = existingGroups.find { it.name == "CloudNode Trial" }
+
+                val targetGroup = if (existingGroup != null) {
+                    // Обновляем ссылку в существующей группе
+                    existingGroup.subscription?.link = finalUrl
+                    GroupManager.updateGroup(existingGroup)
+                    existingGroup
+                } else {
+                    // Создаём новую группу
+                    val group = ProxyGroup(type = GroupType.SUBSCRIPTION, name = "CloudNode Trial")
+                    val subscription = SubscriptionBean().apply { link = finalUrl }
+                    group.subscription = subscription
+                    GroupManager.createGroup(group)
+                }
+
+                GroupUpdater.startUpdate(targetGroup, false)
+                DataStore.selectedGroup = targetGroup.id
+
+                // 6. Ждём загрузки профилей (до 20 сек)
                 var profiles: List<ProxyEntity> = emptyList()
-                for (i in 0 until 30) {
+                for (i in 0 until 40) {
                     delay(500)
-                    profiles = ProfileManager.getProfiles(listOf(createdGroup.id))
+                    profiles = ProfileManager.getProfiles(listOf(targetGroup.id))
                     if (profiles.isNotEmpty()) break
                 }
 
@@ -283,15 +335,15 @@ class MainActivity : ThemedActivity(),
                         DataStore.selectedProxy = first.id
                         DataStore.currentProfile = first.id
                         snackbar("✅ Доступ получен! Подключаем...").show()
-                        connect.launch(null) // ЗАПУСКАЕМ ПОДКЛЮЧЕНИЕ
+                        connect.launch(null)
                     } else {
-                        snackbar("Ошибка: профили не получены с сервера").show()
+                        snackbar("Ошибка: сервер вернул пустую подписку").show()
                     }
                 }
             } catch (e: Exception) {
                 onMainDispatcher {
                     binding.fab.isEnabled = true
-                    snackbar("Ошибка получения доступа: ${e.readableMessage}").show()
+                    snackbar("Ошибка: ${e.readableMessage}").show()
                 }
             }
         }
@@ -314,7 +366,7 @@ class MainActivity : ThemedActivity(),
     private fun startSessionTimer() {
         sessionTimerJob?.cancel()
         sessionTimerJob = MainScope().launch {
-            delay(30 * 60 * 1000L) // 30 минут
+            delay(30 * 60 * 1000L)
             if (DataStore.serviceState.canStop) {
                 SagerNet.stopService()
                 showSessionLimitDialog()
@@ -322,8 +374,6 @@ class MainActivity : ThemedActivity(),
         }
     }
 
-    // ===============================================================
-    // (Остальные стандартные методы импорта и навигации)
     // ===============================================================
 
     fun refreshNavMenu(clashApi: Boolean) {
