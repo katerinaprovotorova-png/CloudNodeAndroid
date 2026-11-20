@@ -69,8 +69,49 @@ object RawUpdater : GroupUpdater() {
                 setURL(subscription.link)
                 setUserAgent(subscription.customUserAgent.takeIf { it.isNotBlank() } ?: USER_AGENT)
             }.execute()
-            proxies = parseRaw(Util.getStringBox(response.contentString).replace("91.132.56.90", "157.228.118.129"))
-                ?: error(app.getString(R.string.no_proxies_found))
+
+            // 🔥 МАГИЯ: Если пользователя удалили (404 или 401), приложение само создаст его заново через безопасный API
+            if (response.statusCode == 404 || response.statusCode == 401) {
+                Logs.d("Subscription returned 404/401. Attempting to recreate user via Mini-API...")
+                
+                // Берем имя из названия группы (например, "Subscription #katya" -> "katya")
+                val username = proxyGroup.name?.replace("Subscription #", "")?.trim() ?: "user_${proxyGroup.id}"
+                
+                // ВНИМАНИЕ: Замени "SuperSecretKey123XYZ" на тот ключ, который ты задала в marzban_api.py!
+                val apiUrl = "http://157.228.118.129:5000/create_user"
+                val apiKey = "SuperSecretKey123XYZ" 
+                
+                val url = java.net.URL(apiUrl)
+                val connection = url.openConnection() as java.net.HttpURLConnection
+                connection.requestMethod = "POST"
+                connection.setRequestProperty("Content-Type", "application/json")
+                connection.setRequestProperty("X-API-Key", apiKey)
+                connection.doOutput = true
+                
+                val jsonInputString = """{"username": "$username"}"""
+                connection.outputStream.use { os ->
+                    val input = jsonInputString.toByteArray(Charsets.UTF_8)
+                    os.write(input, 0, input.size)
+                }
+                
+                if (connection.responseCode == 200) {
+                    Logs.d("✅ User recreated successfully! Fetching new subscription...")
+                    // Повторно запрашиваем подписку, теперь Marzban отдаст её успешно
+                    val newResponse = Libcore.newHttpClient().newRequest().apply {
+                        setURL(subscription.link)
+                        setUserAgent(subscription.customUserAgent.takeIf { it.isNotBlank() } ?: USER_AGENT)
+                    }.execute()
+                    
+                    proxies = parseRaw(Util.getStringBox(newResponse.contentString).replace("91.132.56.90", "157.228.118.129"))
+                        ?: error(app.getString(R.string.no_proxies_found))
+                } else {
+                    error("⚠️ Ваша подписка недействительна или удалена за неактивность.\n\nПожалуйста, обратитесь к администратору для получения новой ссылки.")
+                }
+            } else {
+                // Обычный сценарий: пользователь существует, просто подменяем старый IP на новый
+                proxies = parseRaw(Util.getStringBox(response.contentString).replace("91.132.56.90", "157.228.118.129"))
+                    ?: error(app.getString(R.string.no_proxies_found))
+            }
 
             subscription.subscriptionUserinfo =
                 Util.getStringBox(response.getHeader("Subscription-Userinfo"))
