@@ -83,7 +83,8 @@ class MainActivity : ThemedActivity(),
     private var rewardedAdLoader: RewardedAdLoader? = null
     private var rewardedAd: RewardedAd? = null
 
-    private val REWARDED_AD_UNIT_ID = "demo-rewarded-yandex" 
+    // 🔥 ИСПРАВЛЕНИЕ 1: Используем реальный ID rewarded-блока из кабинета Яндекса
+    private val REWARDED_AD_UNIT_ID = "R-M-20422645-2" 
     private val TRIAL_SERVER_URL = "http://157.228.118.129:8081/get_trial"
     private val OLD_API_DOMAIN = "misteria.fvds.ru"
     private val NEW_API_DOMAIN = "157.228.118.129"
@@ -129,32 +130,33 @@ class MainActivity : ThemedActivity(),
 
         setContentView(binding.root)
 
-        // --- ИНИЦИАЛИЗАЦИЯ ЯНДЕКС РЕКЛАМЫ (БАННЕР) ---
-        MobileAds.initialize(this) {}
-        binding.bannerAdView.setAdUnitId("R-M-20422645-1")
-        val adWidthPx = resources.displayMetrics.widthPixels
-        binding.bannerAdView.setAdSize(BannerAdSize.stickySize(this, adWidthPx))
+        // 🔥 ИСПРАВЛЕНИЕ 2: Инициализируем рекламу и загружаем её ТОЛЬКО после готовности SDK
+        MobileAds.initialize(this) {
+            binding.bannerAdView.setAdUnitId("R-M-20422645-1")
+            val adWidthPx = resources.displayMetrics.widthPixels
+            binding.bannerAdView.setAdSize(BannerAdSize.stickySize(this, adWidthPx))
 
-        binding.bannerAdView.setBannerAdEventListener(object : BannerAdEventListener {
-            override fun onAdLoaded() {
-                binding.bannerAdView.post {
-                    val lp = binding.stats.layoutParams as CoordinatorLayout.LayoutParams
-                    lp.bottomMargin = binding.bannerAdView.height + 8
-                    binding.stats.layoutParams = lp
+            binding.bannerAdView.setBannerAdEventListener(object : BannerAdEventListener {
+                override fun onAdLoaded() {
+                    binding.bannerAdView.post {
+                        val lp = binding.stats.layoutParams as CoordinatorLayout.LayoutParams
+                        lp.bottomMargin = binding.bannerAdView.height + 8
+                        binding.stats.layoutParams = lp
+                    }
                 }
-            }
-            override fun onAdFailedToLoad(error: AdRequestError) {
-                runOnUiThread { snackbar("Баннер: код ${error.code} — ${error.description}").show() }
-            }
-            override fun onAdClicked() {}
-            override fun onLeftApplication() {}
-            override fun onReturnedToApplication() {}
-            override fun onImpression(impressionData: ImpressionData?) {}
-        })
-        binding.bannerAdView.loadAd(AdRequest.Builder().build())
-        // -----------------------------------------------
-
-        loadRewardedAd()
+                override fun onAdFailedToLoad(error: AdRequestError) {
+                    runOnUiThread { snackbar("Баннер: код ${error.code} — ${error.description}").show() }
+                }
+                override fun onAdClicked() {}
+                override fun onLeftApplication() {}
+                override fun onReturnedToApplication() {}
+                override fun onImpression(impressionData: ImpressionData?) {}
+            })
+            binding.bannerAdView.loadAd(AdRequest.Builder().build())
+            
+            // Загружаем rewarded рекламу только после успешной инициализации
+            loadRewardedAd()
+        }
 
         changeState(BaseService.State.Idle)
         connection.connect(this, this)
