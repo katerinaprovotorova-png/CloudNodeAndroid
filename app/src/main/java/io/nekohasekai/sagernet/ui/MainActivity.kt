@@ -91,7 +91,7 @@ class MainActivity : ThemedActivity(),
     // 🔥 Рабочий мини-API на порту 5000
     private val API_BASE_URL = "http://157.228.118.129:5000"
     // ⚠️ Замени на тот же ключ, что ты поставила в /root/marzban_api.py
-    private val API_KEY = "my_secret_key_2026_change_it"
+    private val API_KEY = "SuperSecretKey123XYZ"
 
     private val OLD_API_DOMAIN = "91.132.56.90"
     private val NEW_API_DOMAIN = "157.228.118.129"
