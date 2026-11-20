@@ -132,7 +132,7 @@ class MainActivity : ThemedActivity(),
 
         // 🔥 ИСПРАВЛЕНИЕ 2: Инициализируем рекламу и загружаем её ТОЛЬКО после готовности SDK
         MobileAds.initialize(this) {
-            binding.bannerAdView.setAdUnitId("R-M-20422645-1")
+            binding.bannerAdView.setAdUnitId("R-M-TEST-1-VBanner")
             val adWidthPx = resources.displayMetrics.widthPixels
             binding.bannerAdView.setAdSize(BannerAdSize.stickySize(this, adWidthPx))
 
