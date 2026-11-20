@@ -56,23 +56,32 @@ object RawUpdater : GroupUpdater() {
                 ?: error(app.getString(R.string.no_proxies_found_in_subscription))
         } else {
 
-            val response = Libcore.newHttpClient().apply {
-                trySocks5(DataStore.mixedPort)
-                tryH3Direct()
-                when (DataStore.appTLSVersion) {
-                    "1.3" -> restrictedTLS()
+            // 🔥 МАГИЯ: Перехватываем исключение, так как libcore выбрасывает ошибку при статусе != 200
+            val response = try {
+                Libcore.newHttpClient().apply {
+                    trySocks5(DataStore.mixedPort)
+                    tryH3Direct()
+                    when (DataStore.appTLSVersion) {
+                        "1.3" -> restrictedTLS()
+                    }
+                }.newRequest().apply {
+                    if (DataStore.allowInsecureOnRequest) {
+                        allowInsecure()
+                    }
+                    setURL(subscription.link)
+                    setUserAgent(subscription.customUserAgent.takeIf { it.isNotBlank() } ?: USER_AGENT)
+                }.execute()
+            } catch (e: Exception) {
+                val msg = e.message ?: ""
+                // Если Marzban вернул 404 или 401, возвращаем null, чтобы запустить логику восстановления
+                if (msg.contains("HTTP 404") || msg.contains("HTTP 401")) {
+                    null
+                } else {
+                    throw e // Любая другая ошибка пробрасывается дальше
                 }
-            }.newRequest().apply {
-                if (DataStore.allowInsecureOnRequest) {
-                    allowInsecure()
-                }
-                setURL(subscription.link)
-                setUserAgent(subscription.customUserAgent.takeIf { it.isNotBlank() } ?: USER_AGENT)
-            }.execute()
+            }
 
-            // 🔥 МАГИЯ: Если пользователя удалили (404 или 401), приложение само создаст его заново через безопасный API
-            // Используем .code вместо .statusCode, так как так требует библиотека Libcore
-            if (response.code == 404 || response.code == 401) {
+            if (response == null) {
                 Logs.d("Subscription returned 404/401. Attempting to recreate user via Mini-API...")
                 
                 // Берем имя из названия группы (например, "Subscription #katya" -> "katya")
@@ -105,6 +114,8 @@ object RawUpdater : GroupUpdater() {
                     
                     proxies = parseRaw(Util.getStringBox(newResponse.contentString).replace("91.132.56.90", "157.228.118.129"))
                         ?: error(app.getString(R.string.no_proxies_found))
+                        
+                    subscription.subscriptionUserinfo = Util.getStringBox(newResponse.getHeader("Subscription-Userinfo"))
                 } else {
                     error("⚠️ Ваша подписка недействительна или удалена за неактивность.\n\nПожалуйста, обратитесь к администратору для получения новой ссылки.")
                 }
@@ -112,18 +123,18 @@ object RawUpdater : GroupUpdater() {
                 // Обычный сценарий: пользователь существует, просто подменяем старый IP на новый
                 proxies = parseRaw(Util.getStringBox(response.contentString).replace("91.132.56.90", "157.228.118.129"))
                     ?: error(app.getString(R.string.no_proxies_found))
-            }
 
-            subscription.subscriptionUserinfo =
-                Util.getStringBox(response.getHeader("Subscription-Userinfo"))
+                subscription.subscriptionUserinfo =
+                    Util.getStringBox(response.getHeader("Subscription-Userinfo"))
 
-            // 修改默认名字
-            if (proxyGroup.name?.startsWith("Subscription #") == true) {
-                var remoteName = Util.getStringBox(response.getHeader("content-disposition"))
-                if (remoteName.isNotBlank()) {
-                    remoteName = Util.decodeFilename(remoteName)
+                // 修改默认名字
+                if (proxyGroup.name?.startsWith("Subscription #") == true) {
+                    var remoteName = Util.getStringBox(response.getHeader("content-disposition"))
                     if (remoteName.isNotBlank()) {
-                        proxyGroup.name = remoteName
+                        remoteName = Util.decodeFilename(remoteName)
+                        if (remoteName.isNotBlank()) {
+                            proxyGroup.name = remoteName
+                        }
                     }
                 }
             }
