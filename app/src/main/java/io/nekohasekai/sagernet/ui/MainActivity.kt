@@ -48,6 +48,7 @@ import io.nekohasekai.sagernet.database.GroupManager
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.ProxyEntity
+import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.SubscriptionBean
 import io.nekohasekai.sagernet.database.preference.OnPreferenceDataStoreChangeListener
 import io.nekohasekai.sagernet.databinding.LayoutMainBinding
@@ -87,7 +88,7 @@ class MainActivity : ThemedActivity(),
     private var rewardedAdLoader: RewardedAdLoader? = null
     private var rewardedAd: RewardedAd? = null
 
-    // 🔥 Рабочий мини-API на порту 5000 (тот, что мы с тобой сделали и проверили)
+    // 🔥 Рабочий мини-API на порту 5000
     private val API_BASE_URL = "http://157.228.118.129:5000"
     // ⚠️ Замени на тот же ключ, что ты поставила в /root/marzban_api.py
     private val API_KEY = "my_secret_key_2026_change_it"
@@ -139,7 +140,7 @@ class MainActivity : ThemedActivity(),
 
         setContentView(binding.root)
 
-        // --- ИНИЦИАЛИЗАЦИЯ ЯНДЕКС РЕКЛАМЫ (после инициализации SDK) ---
+        // --- ИНИЦИАЛИЗАЦИЯ ЯНДЕКС РЕКЛАМЫ ---
         MobileAds.initialize(this) {
             binding.bannerAdView.setAdUnitId(BANNER_AD_UNIT_ID)
             val adWidthPx = resources.displayMetrics.widthPixels
@@ -266,8 +267,7 @@ class MainActivity : ThemedActivity(),
                     .build()
 
                 val checkResp = client.newCall(checkReq).execute()
-                val checkBody = checkResp.body?.string()
-                    ?: throw Exception("Пустой ответ от сервера")
+                val checkBody = checkResp.body?.string() ?: throw Exception("Пустой ответ от сервера")
                 val checkJson = JSONObject(checkBody)
 
                 var subscriptionUrl: String? = checkJson.optString("subscription_url", null)
@@ -281,8 +281,7 @@ class MainActivity : ThemedActivity(),
                         .build()
 
                     val createResp = client.newCall(createReq).execute()
-                    val createBody = createResp.body?.string()
-                        ?: throw Exception("Пустой ответ при создании")
+                    val createBody = createResp.body?.string() ?: throw Exception("Пустой ответ при создании")
                     val createJson = JSONObject(createBody)
 
                     subscriptionUrl = createJson.optString("subscription_url", null)
@@ -292,16 +291,16 @@ class MainActivity : ThemedActivity(),
                     throw Exception("Сервер не вернул ссылку на подписку")
                 }
 
-                // 3. Подменяем старый IP на новый (на всякий случай)
+                // 3. Подменяем старый IP на новый
                 val finalUrl = subscriptionUrl.replace(OLD_API_DOMAIN, NEW_API_DOMAIN)
 
-                // 4. Проверяем, что это валидный URL (а не текст ошибки)
+                // 4. Проверяем, что это валидный URL
                 if (!finalUrl.startsWith("http://") && !finalUrl.startsWith("https://")) {
                     throw Exception("Сервер вернул некорректную ссылку: $finalUrl")
                 }
 
                 // 5. Ищем существующую группу с таким именем — если есть, не плодим новые
-                val existingGroups = GroupManager.getGroups()
+                val existingGroups = SagerDatabase.groupDao.allGroups()
                 val existingGroup = existingGroups.find { it.name == "CloudNode Trial" }
 
                 val targetGroup = if (existingGroup != null) {
@@ -324,7 +323,7 @@ class MainActivity : ThemedActivity(),
                 var profiles: List<ProxyEntity> = emptyList()
                 for (i in 0 until 40) {
                     delay(500)
-                    profiles = ProfileManager.getProfiles(listOf(targetGroup.id))
+                    profiles = SagerDatabase.proxyDao.getByGroup(targetGroup.id)
                     if (profiles.isNotEmpty()) break
                 }
 
