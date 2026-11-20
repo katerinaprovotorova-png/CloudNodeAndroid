@@ -71,7 +71,8 @@ object RawUpdater : GroupUpdater() {
             }.execute()
 
             // 🔥 МАГИЯ: Если пользователя удалили (404 или 401), приложение само создаст его заново через безопасный API
-            if (response.statusCode == 404 || response.statusCode == 401) {
+            // Используем .code вместо .statusCode, так как так требует библиотека Libcore
+            if (response.code == 404 || response.code == 401) {
                 Logs.d("Subscription returned 404/401. Attempting to recreate user via Mini-API...")
                 
                 // Берем имя из названия группы (например, "Subscription #katya" -> "katya")
