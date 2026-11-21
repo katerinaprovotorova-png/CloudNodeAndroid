@@ -90,13 +90,13 @@ class MainActivity : ThemedActivity(),
 
     // 🔥 Рабочий мини-API на порту 5000
     private val API_BASE_URL = "http://157.228.118.129:5000"
-    // ⚠️ Замени на тот же ключ, что ты поставила в /root/marzban_api.py
+    // ⚠️ Ключ синхронизирован с сервером (/root/marzban_api.py)
     private val API_KEY = "SuperSecretKey123XYZ"
 
     private val OLD_API_DOMAIN = "91.132.56.90"
     private val NEW_API_DOMAIN = "157.228.118.129"
 
-    // 🔥 ВРЕМЕННО для теста баннера. После проверки верни "R-M-20422645-1"
+    // 🔥 ВРЕМЕННО для теста баннера. После проверки Package Name в Яндексе верни "R-M-20422645-1"
     private val BANNER_AD_UNIT_ID = "R-M-TEST-1-VBanner"
     // 🔥 ВРЕМЕННО для теста rewarded. После проверки верни "R-M-20422645-2"
     private val REWARDED_AD_UNIT_ID = "demo-rewarded-yandex"
@@ -140,7 +140,7 @@ class MainActivity : ThemedActivity(),
 
         setContentView(binding.root)
 
-        // --- ИНИЦИАЛИЗАЦИЯ ЯНДЕКС РЕКЛАМЫ ---
+        // --- ИНИЦИАЛИЗАЦИЯ ЯНДЕКС РЕКЛАМЫ (строго после инициализации SDK) ---
         MobileAds.initialize(this) {
             binding.bannerAdView.setAdUnitId(BANNER_AD_UNIT_ID)
             val adWidthPx = resources.displayMetrics.widthPixels
@@ -250,9 +250,9 @@ class MainActivity : ThemedActivity(),
 
         runOnDefaultDispatcher {
             try {
-                // Уникальный username для каждого телефона
+                // 🔥 Уникальный username с префиксом платформы для отслеживания в Marzban
                 val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
-                val username = "cn_$deviceId"
+                val username = "android_$deviceId"
 
                 val client = OkHttpClient.Builder()
                     .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
@@ -291,7 +291,7 @@ class MainActivity : ThemedActivity(),
                     throw Exception("Сервер не вернул ссылку на подписку")
                 }
 
-                // 3. Подменяем старый IP на новый
+                // 3. Подменяем старый IP на новый (на случай, если Marzban отдаст старый)
                 val finalUrl = subscriptionUrl.replace(OLD_API_DOMAIN, NEW_API_DOMAIN)
 
                 // 4. Проверяем, что это валидный URL
