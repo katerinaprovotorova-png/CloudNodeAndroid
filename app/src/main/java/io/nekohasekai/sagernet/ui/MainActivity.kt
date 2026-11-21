@@ -119,17 +119,13 @@ class MainActivity : ThemedActivity(),
             }
         }
 
-        // --- ЛОГИКА КНОПКИ САМОЛЁТИКА ---
         binding.fab.setOnClickListener {
             if (DataStore.serviceState.canStop) {
-                // При отключении: удаляем пользователя с сервера и останавливаем VPN
                 deleteUserFromServer { SagerNet.stopService() }
             } else {
-                // При подключении: СНАЧАЛА показываем рекламу (пока VPN выключен, IP российский!), потом подключаем
                 showRewardedAd { fetchAndConnectTrial() }
             }
         }
-        // --------------------------------
 
         binding.stats.setOnClickListener { if (DataStore.serviceState.connected) binding.stats.testConnection() }
 
@@ -187,7 +183,7 @@ class MainActivity : ThemedActivity(),
         }
     }
 
-    // ================= ВОЗНАГРАЖДАЕМАЯ РЕКЛАМА =================
+    // ================= РЕКЛАМА =================
 
     private fun loadRewardedAd() {
         if (rewardedAdLoader == null) {
@@ -237,7 +233,7 @@ class MainActivity : ThemedActivity(),
                     .header("X-API-Key", API_KEY)
                     .delete()
                     .build()
-                
+
                 client.newCall(deleteReq).enqueue(object : okhttp3.Callback {
                     override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
                         onMainDispatcher { afterDelete() }
@@ -253,7 +249,7 @@ class MainActivity : ThemedActivity(),
         }
     }
 
-    // ================= ПРОВЕРКА И ПОЛУЧЕНИЕ КОНФИГУРАЦИИ =================
+    // ================= ПОЛУЧЕНИЕ КОНФИГУРАЦИИ =================
 
     private fun fetchAndConnectTrial() {
         snackbar("Проверка доступа...").show()
@@ -315,7 +311,6 @@ class MainActivity : ThemedActivity(),
                     throw Exception("Не удалось распарсить конфигурацию")
                 }
                 val bean = beans.first()
-                bean.initializeDefaultValues()
 
                 val entity: ProxyEntity = ProfileManager.createProfile(targetGroupId, bean)
 
@@ -337,30 +332,30 @@ class MainActivity : ThemedActivity(),
         }
     }
 
-    // ================= ТАЙМЕР СЕССИИ 1 ЧАС + МОНЕТИЗАЦИЯ НА РЕКЛАМЕ =================
+    // ================= ТАЙМЕР 1 ЧАС + РЕКЛАМА =================
 
     private fun showSessionLimitDialog() {
         MaterialAlertDialogBuilder(this)
             .setTitle("⏱ Бесплатный час истек")
-            .setMessage("Чтобы продолжить пользоваться VPN бесплатно, пожалуйста, посмотрите короткую рекламу. Это поддерживает развитие приложения!")
+            .setMessage("Чтобы продолжить пользоваться VPN бесплатно, посмотри короткую рекламу. Это поддерживает развитие приложения!")
             .setPositiveButton("🎬 Посмотреть рекламу (+1 час)") { _, _ ->
-                showRewardedAd { 
-                    startSessionTimer() // Запускаем таймер заново
-                    connect.launch(null) // Подключаем VPN
+                showRewardedAd {
+                    startSessionTimer()
+                    connect.launch(null)
                     snackbar("✅ Время продлено! Подключаем...").show()
                 }
             }
             .setNegativeButton("Выйти и удалить данные") { _, _ ->
                 deleteUserFromServer { SagerNet.stopService() }
             }
-            .setCancelable(false) // Нельзя закрыть кнопкой "Назад", нужно сделать выбор
+            .setCancelable(false)
             .show()
     }
 
     private fun startSessionTimer() {
         sessionTimerJob?.cancel()
         sessionTimerJob = MainScope().launch {
-            delay(60 * 60 * 1000L) // Ровно 1 час (60 минут)
+            delay(60 * 60 * 1000L)
             if (DataStore.serviceState.canStop) {
                 SagerNet.stopService()
                 showSessionLimitDialog()
@@ -368,8 +363,6 @@ class MainActivity : ThemedActivity(),
         }
     }
 
-    // ===============================================================
-    // (Остальной код импортов, фрагментов и обработчиков остался без изменений)
     // ===============================================================
 
     fun refreshNavMenu(clashApi: Boolean) {
