@@ -88,13 +88,10 @@ class MainActivity : ThemedActivity(),
     private var rewardedAdLoader: RewardedAdLoader? = null
     private var rewardedAd: RewardedAd? = null
 
-    // 🔥 Мини-API на порту 5000 — возвращает ПРЯМУЮ vless:// ссылку
     private val API_BASE_URL = "http://157.228.118.129:5000"
     private val API_KEY = "SuperSecretKey123XYZ"
 
-    // 🔥 ВРЕМЕННО для теста баннера. После активации в Яндексе верни "R-M-20422645-1"
     private val BANNER_AD_UNIT_ID = "R-M-TEST-1-VBanner"
-    // 🔥 ВРЕМЕННО для теста rewarded. После активации верни "R-M-20422645-2"
     private val REWARDED_AD_UNIT_ID = "demo-rewarded-yandex"
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -125,9 +122,11 @@ class MainActivity : ThemedActivity(),
         // --- ЛОГИКА КНОПКИ САМОЛЁТИКА ---
         binding.fab.setOnClickListener {
             if (DataStore.serviceState.canStop) {
-                confirmStopWithRewardAd()
+                // При отключении просто удаляем пользователя и останавливаем сервис (без рекламы, это хороший UX)
+                deleteUserFromServer { SagerNet.stopService() }
             } else {
-                checkAndConnectTrialIfNeeded()
+                // При подключении сначала показываем рекламу, затем подключаем
+                showRewardedAd { fetchAndConnectTrial() }
             }
         }
         // --------------------------------
@@ -136,7 +135,6 @@ class MainActivity : ThemedActivity(),
 
         setContentView(binding.root)
 
-        // --- ИНИЦИАЛИЗАЦИЯ ЯНДЕКС РЕКЛАМЫ (строго после готовности SDK) ---
         MobileAds.initialize(this) {
             binding.bannerAdView.setAdUnitId(BANNER_AD_UNIT_ID)
             val adWidthPx = resources.displayMetrics.widthPixels
@@ -226,16 +224,36 @@ class MainActivity : ThemedActivity(),
         ad.show(this)
     }
 
-    private fun confirmStopWithRewardAd() {
-        showRewardedAd { SagerNet.stopService() }
+    // ================= УДАЛЕНИЕ ПОЛЬЗОВАТЕЛЯ ПРИ ОТКЛЮЧЕНИИ =================
+
+    private fun deleteUserFromServer(afterDelete: () -> Unit) {
+        runOnDefaultDispatcher {
+            try {
+                val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
+                val username = "android_$deviceId"
+                val client = OkHttpClient.Builder().connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS).build()
+                val deleteReq = Request.Builder()
+                    .url("$API_BASE_URL/delete_user?username=$username")
+                    .header("X-API-Key", API_KEY)
+                    .delete()
+                    .build()
+                
+                client.newCall(deleteReq).enqueue(object : okhttp3.Callback {
+                    override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
+                        onMainDispatcher { afterDelete() }
+                    }
+                    override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                        response.close()
+                        onMainDispatcher { afterDelete() }
+                    }
+                })
+            } catch (e: Exception) {
+                onMainDispatcher { afterDelete() }
+            }
+        }
     }
 
     // ================= ПРОВЕРКА И ПОЛУЧЕНИЕ КОНФИГУРАЦИИ =================
-
-    private fun checkAndConnectTrialIfNeeded() {
-        // ВСЕГДА сверяемся с сервером, чтобы не пытаться подключиться с удалённым/истёкшим пользователем
-        fetchAndConnectTrial()
-    }
 
     private fun fetchAndConnectTrial() {
         snackbar("Проверка доступа...").show()
@@ -245,13 +263,11 @@ class MainActivity : ThemedActivity(),
             try {
                 val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
                 val username = "android_$deviceId"
-
                 val client = OkHttpClient.Builder()
                     .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
                     .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
                     .build()
 
-                // 1. Спрашиваем сервер: жив ли пользователь?
                 val checkReq = Request.Builder()
                     .url("$API_BASE_URL/check_user?username=$username")
                     .header("X-API-Key", API_KEY)
@@ -265,7 +281,6 @@ class MainActivity : ThemedActivity(),
                 val serverLink = checkJson.optString("direct_link", null)
                 val targetGroupId = DataStore.selectedGroup.takeIf { it > 0 } ?: 1L
 
-                // 2. Если пользователь на сервере ЖИВ и в приложении есть профиль — просто подключаем
                 if (exists && !serverLink.isNullOrEmpty() && DataStore.selectedProxy > 0) {
                     onMainDispatcher {
                         binding.fab.isEnabled = true
@@ -275,8 +290,6 @@ class MainActivity : ThemedActivity(),
                     return@runOnDefaultDispatcher
                 }
 
-                // 3. Пользователя нет (или профиль в приложении битый/отсутствует) —
-                //    удаляем несуществующее соединение и создаём нового пользователя
                 GroupManager.clearGroup(targetGroupId)
 
                 val createReq = Request.Builder()
@@ -297,7 +310,6 @@ class MainActivity : ThemedActivity(),
                     throw Exception("Сервер не вернул прямую ссылку на конфигурацию")
                 }
 
-                // 4. Импортируем НОВУЮ ссылку как профиль
                 val beans = parseProxies(newLink)
                 if (beans.isEmpty()) {
                     throw Exception("Не удалось распарсить конфигурацию")
@@ -313,7 +325,7 @@ class MainActivity : ThemedActivity(),
 
                 onMainDispatcher {
                     binding.fab.isEnabled = true
-                    snackbar("✅ Новый пользователь создан! Подключаем...").show()
+                    snackbar("✅ Доступ получен! Подключаем...").show()
                     connect.launch(null)
                 }
             } catch (e: Exception) {
@@ -325,15 +337,17 @@ class MainActivity : ThemedActivity(),
         }
     }
 
-    // ================= ТАЙМЕР СЕССИИ 30 МИН =================
+    // ================= ТАЙМЕР СЕССИИ 60 МИН =================
 
     private fun showSessionLimitDialog() {
         MaterialAlertDialogBuilder(this)
             .setTitle("⏱ Лимит бесплатной сессии")
-            .setMessage("Бесплатное время (30 минут) истекло. Нажмите кнопку ниже, чтобы продолжить работу.")
-            .setPositiveButton("Продолжить") { _, _ ->
-                connect.launch(null)
-                startSessionTimer()
+            .setMessage("Бесплатное время (60 минут) истекло. Посмотрите короткую рекламу, чтобы продолжить работу.")
+            .setPositiveButton("Посмотреть рекламу") { _, _ ->
+                showRewardedAd { fetchAndConnectTrial() }
+            }
+            .setNegativeButton("Выйти") { _, _ ->
+                deleteUserFromServer { SagerNet.stopService() }
             }
             .setCancelable(false)
             .show()
@@ -342,7 +356,7 @@ class MainActivity : ThemedActivity(),
     private fun startSessionTimer() {
         sessionTimerJob?.cancel()
         sessionTimerJob = MainScope().launch {
-            delay(30 * 60 * 1000L)
+            delay(60 * 60 * 1000L) // 60 минут
             if (DataStore.serviceState.canStop) {
                 SagerNet.stopService()
                 showSessionLimitDialog()
@@ -350,6 +364,8 @@ class MainActivity : ThemedActivity(),
         }
     }
 
+    // ===============================================================
+    // (Остальной код импортов, фрагментов и обработчиков остался без изменений для экономии места и сохранения стабильности)
     // ===============================================================
 
     fun refreshNavMenu(clashApi: Boolean) {
