@@ -16,6 +16,7 @@ import androidx.annotation.IdRes
 import androidx.coordinatorlayout.widget.CoordinatorLayout
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.preference.PreferenceDataStore
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.navigation.NavigationView
@@ -61,10 +62,9 @@ import io.nekohasekai.sagernet.ktx.alert
 import io.nekohasekai.sagernet.ktx.isPlay
 import io.nekohasekai.sagernet.ktx.isPreview
 import io.nekohasekai.sagernet.ktx.launchCustomTab
-import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.ktx.parseProxies
 import io.nekohasekai.sagernet.ktx.readableMessage
-import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
@@ -91,6 +91,7 @@ class MainActivity : ThemedActivity(),
     private val API_BASE_URL = "http://157.228.118.129:5000"
     private val API_KEY = "SuperSecretKey123XYZ"
 
+    // ⚠️ Если баннер не показывается, замени "R-M-TEST-1-VBanner" на "R-M-20422645-1"
     private val BANNER_AD_UNIT_ID = "R-M-TEST-1-VBanner"
     private val REWARDED_AD_UNIT_ID = "demo-rewarded-yandex"
 
@@ -223,7 +224,8 @@ class MainActivity : ThemedActivity(),
     // ================= УДАЛЕНИЕ ПОЛЬЗОВАТЕЛЯ ПРИ ОТКЛЮЧЕНИИ =================
 
     private fun deleteUserFromServer(afterDelete: () -> Unit) {
-        runOnDefaultDispatcher {
+        // Используем lifecycleScope, который гарантированно создает корутину
+        lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
                 val username = "android_$deviceId"
@@ -236,27 +238,27 @@ class MainActivity : ThemedActivity(),
 
                 client.newCall(deleteReq).enqueue(object : okhttp3.Callback {
                     override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
-                        onMainDispatcher { afterDelete() }
+                        runOnUiThread { afterDelete() }
                     }
                     override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
                         response.close()
-                        onMainDispatcher { afterDelete() }
+                        runOnUiThread { afterDelete() }
                     }
                 })
             } catch (e: Exception) {
-                onMainDispatcher { afterDelete() }
+                runOnUiThread { afterDelete() }
             }
         }
     }
 
-    // ================= ПОЛУЧЕНИЕ КОНФИГУРАЦИИ (с проверкой exists) =================
+    // ================= ПОЛУЧЕНИЕ КОНФИГУРАЦИИ =================
 
     private fun fetchAndConnectTrial() {
         snackbar("Проверка доступа...").show()
         binding.fab.isEnabled = false
 
-        // 🔥 Используем проверенный runOnDefaultDispatcher, который гарантированно компилируется в этом проекте
-        runOnDefaultDispatcher {
+        // Используем lifecycleScope, который гарантированно создает корутину и компилируется
+        lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
                 val username = "android_$deviceId"
@@ -278,17 +280,15 @@ class MainActivity : ThemedActivity(),
                 val serverLink = checkJson.optString("direct_link", null)
                 val targetGroupId = DataStore.selectedGroup.takeIf { it > 0 } ?: 1L
 
-                // 🔥 Если пользователь активен и профиль есть — просто подключаем
                 if (exists && !serverLink.isNullOrEmpty() && DataStore.selectedProxy > 0) {
-                    onMainDispatcher {
+                    runOnUiThread {
                         binding.fab.isEnabled = true
                         snackbar("Подключение...").show()
                         connect.launch(null)
                     }
-                    return@runOnDefaultDispatcher
+                    return@launch
                 }
 
-                // 🔥 Если пользователя нет (или он expired) — чистим старое и создаем нового
                 GroupManager.clearGroup(targetGroupId)
 
                 val createReq = Request.Builder()
@@ -321,13 +321,13 @@ class MainActivity : ThemedActivity(),
                 DataStore.selectedProxy = entity.id
                 DataStore.currentProfile = entity.id
 
-                onMainDispatcher {
+                runOnUiThread {
                     binding.fab.isEnabled = true
                     snackbar("✅ Доступ получен! Подключаем...").show()
                     connect.launch(null)
                 }
             } catch (e: Exception) {
-                onMainDispatcher {
+                runOnUiThread {
                     binding.fab.isEnabled = true
                     snackbar("Ошибка: ${e.readableMessage}").show()
                 }
@@ -377,7 +377,7 @@ class MainActivity : ThemedActivity(),
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         val uri = intent.data ?: return
-        runOnDefaultDispatcher {
+        lifecycleScope.launch(Dispatchers.IO) {
             if (uri.scheme == "sn" && uri.host == "subscription" || uri.scheme == "clash") {
                 importSubscription(uri)
             } else {
@@ -409,7 +409,7 @@ class MainActivity : ThemedActivity(),
                     ProxyGroup().apply { export = true }, Util.zlibDecompress(Util.b64Decode(data))
                 ).apply { export = false }
             } catch (e: Exception) {
-                onMainDispatcher { alert(e.readableMessage).show() }
+                runOnUiThread { alert(e.readableMessage).show() }
                 return
             }
         }
@@ -417,11 +417,11 @@ class MainActivity : ThemedActivity(),
         if (name.isNullOrBlank()) return
         group.name = group.name.takeIf { !it.isNullOrBlank() } ?: ("Subscription #" + System.currentTimeMillis())
 
-        onMainDispatcher {
+        runOnUiThread {
             displayFragmentWithId(R.id.nav_group)
             MaterialAlertDialogBuilder(this@MainActivity).setTitle(R.string.subscription_import)
                 .setMessage(getString(R.string.subscription_import_message, name))
-                .setPositiveButton(R.string.yes) { _, _ -> runOnDefaultDispatcher { finishImportSubscription(group) } }
+                .setPositiveButton(R.string.yes) { _, _ -> lifecycleScope.launch(Dispatchers.IO) { finishImportSubscription(group) } }
                 .setNegativeButton(android.R.string.cancel, null)
                 .show()
         }
@@ -436,13 +436,13 @@ class MainActivity : ThemedActivity(),
         val profile = try {
             parseProxies(uri.toString()).getOrNull(0) ?: error(getString(R.string.no_proxies_found))
         } catch (e: Exception) {
-            onMainDispatcher { alert(e.readableMessage).show() }
+            runOnUiThread { alert(e.readableMessage).show() }
             return
         }
-        onMainDispatcher {
+        runOnUiThread {
             MaterialAlertDialogBuilder(this@MainActivity).setTitle(R.string.profile_import)
                 .setMessage(getString(R.string.profile_import_message, profile.displayName()))
-                .setPositiveButton(R.string.yes) { _, _ -> runOnDefaultDispatcher { finishImportProfile(profile) } }
+                .setPositiveButton(R.string.yes) { _, _ -> lifecycleScope.launch(Dispatchers.IO) { finishImportProfile(profile) } }
                 .setNegativeButton(android.R.string.cancel, null)
                 .show()
         }
@@ -451,7 +451,7 @@ class MainActivity : ThemedActivity(),
     private suspend fun finishImportProfile(profile: AbstractBean) {
         val targetId = DataStore.selectedGroupForImport()
         ProfileManager.createProfile(targetId, profile)
-        onMainDispatcher {
+        runOnUiThread {
             displayFragmentWithId(R.id.nav_configuration)
             snackbar(resources.getQuantityString(R.plurals.added, 1, 1)).show()
         }
@@ -570,14 +570,14 @@ class MainActivity : ThemedActivity(),
     }
 
     override fun cbTrafficUpdate(data: TrafficData) {
-        runOnDefaultDispatcher { ProfileManager.postUpdate(data) }
+        lifecycleScope.launch(Dispatchers.IO) { ProfileManager.postUpdate(data) }
     }
 
     override fun cbSelectorUpdate(id: Long) {
         val old = DataStore.selectedProxy
         DataStore.selectedProxy = id
         DataStore.currentProfile = id
-        runOnDefaultDispatcher {
+        lifecycleScope.launch(Dispatchers.IO) {
             ProfileManager.postUpdate(old, true)
             ProfileManager.postUpdate(id, true)
         }
