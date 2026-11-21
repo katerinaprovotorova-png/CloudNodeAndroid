@@ -88,17 +88,12 @@ class MainActivity : ThemedActivity(),
     private var rewardedAdLoader: RewardedAdLoader? = null
     private var rewardedAd: RewardedAd? = null
 
-    // 🔥 Рабочий мини-API на порту 5000
+    // 🔥 Мини-API на порту 5000 — возвращает ПРЯМУЮ vless:// ссылку
     private val API_BASE_URL = "http://157.228.118.129:5000"
-    // ⚠️ Ключ синхронизирован с сервером (/root/marzban_api.py)
     private val API_KEY = "SuperSecretKey123XYZ"
+    private val GROUP_NAME = "CloudNode Trial"
 
-    private val OLD_API_DOMAIN = "91.132.56.90"
-    private val NEW_API_DOMAIN = "157.228.118.129"
-
-    // 🔥 ВРЕМЕННО для теста баннера. После проверки Package Name в Яндексе верни "R-M-20422645-1"
     private val BANNER_AD_UNIT_ID = "R-M-TEST-1-VBanner"
-    // 🔥 ВРЕМЕННО для теста rewarded. После проверки верни "R-M-20422645-2"
     private val REWARDED_AD_UNIT_ID = "demo-rewarded-yandex"
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -140,7 +135,7 @@ class MainActivity : ThemedActivity(),
 
         setContentView(binding.root)
 
-        // --- ИНИЦИАЛИЗАЦИЯ ЯНДЕКС РЕКЛАМЫ (строго после инициализации SDK) ---
+        // --- ИНИЦИАЛИЗАЦИЯ ЯНДЕКС РЕКЛАМЫ (строго после готовности SDK) ---
         MobileAds.initialize(this) {
             binding.bannerAdView.setAdUnitId(BANNER_AD_UNIT_ID)
             val adWidthPx = resources.displayMetrics.widthPixels
@@ -234,7 +229,7 @@ class MainActivity : ThemedActivity(),
         showRewardedAd { SagerNet.stopService() }
     }
 
-    // ================= УМНОЕ ПОДКЛЮЧЕНИЕ ЧЕРЕЗ МИНИ-API =================
+    // ================= ПОЛУЧЕНИЕ ПРЯМОЙ КОНФИГУРАЦИИ (БЕЗ ПОДПИСКИ!) =================
 
     private fun checkAndConnectTrialIfNeeded() {
         if (DataStore.selectedGroup > 0 && DataStore.selectedProxy > 0) {
@@ -245,12 +240,12 @@ class MainActivity : ThemedActivity(),
     }
 
     private fun fetchAndConnectTrial() {
-        snackbar("Получение доступа...").show()
+        snackbar("Получение конфигурации...").show()
         binding.fab.isEnabled = false
 
         runOnDefaultDispatcher {
             try {
-                // 🔥 Уникальный username с префиксом платформы для отслеживания в Marzban
+                // Уникальный username с префиксом платформы
                 val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
                 val username = "android_$deviceId"
 
@@ -259,7 +254,7 @@ class MainActivity : ThemedActivity(),
                     .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
                     .build()
 
-                // 1. Проверяем, есть ли пользователь
+                // 1. Проверяем пользователя — мини-API вернёт ПРЯМУЮ vless:// ссылку
                 val checkReq = Request.Builder()
                     .url("$API_BASE_URL/check_user?username=$username")
                     .header("X-API-Key", API_KEY)
@@ -267,13 +262,12 @@ class MainActivity : ThemedActivity(),
                     .build()
 
                 val checkResp = client.newCall(checkReq).execute()
-                val checkBody = checkResp.body?.string() ?: throw Exception("Пустой ответ от сервера")
-                val checkJson = JSONObject(checkBody)
+                val checkJson = JSONObject(checkResp.body?.string() ?: throw Exception("Пустой ответ от сервера"))
 
-                var subscriptionUrl: String? = checkJson.optString("subscription_url", null)
+                var directLink: String? = checkJson.optString("direct_link", null)
 
-                // 2. Если пользователя нет — создаём
-                if (!checkJson.optBoolean("exists", false) || subscriptionUrl.isNullOrEmpty()) {
+                // 2. Если пользователя нет или ссылки нет — создаём
+                if (!checkJson.optBoolean("exists", false) || directLink.isNullOrEmpty()) {
                     val createReq = Request.Builder()
                         .url("$API_BASE_URL/create_user")
                         .header("X-API-Key", API_KEY)
@@ -281,63 +275,52 @@ class MainActivity : ThemedActivity(),
                         .build()
 
                     val createResp = client.newCall(createReq).execute()
-                    val createBody = createResp.body?.string() ?: throw Exception("Пустой ответ при создании")
-                    val createJson = JSONObject(createBody)
+                    val createJson = JSONObject(createResp.body?.string() ?: throw Exception("Пустой ответ при создании"))
 
-                    subscriptionUrl = createJson.optString("subscription_url", null)
+                    if (!createJson.optBoolean("success", false)) {
+                        throw Exception("Сервер не создал пользователя: ${createJson.optString("details", "")}")
+                    }
+                    directLink = createJson.optString("direct_link", null)
                 }
 
-                if (subscriptionUrl.isNullOrEmpty()) {
-                    throw Exception("Сервер не вернул ссылку на подписку")
+                if (directLink.isNullOrEmpty()) {
+                    throw Exception("Сервер не вернул прямую ссылку на конфигурацию")
                 }
 
-                // 3. Подменяем старый IP на новый (на случай, если Marzban отдаст старый)
-                val finalUrl = subscriptionUrl.replace(OLD_API_DOMAIN, NEW_API_DOMAIN)
+                // 3. Парсим ПРЯМУЮ ссылку в профиль (vless://...)
+                val beans = parseProxies(directLink)
+                if (beans.isEmpty()) {
+                    throw Exception("Не удалось распарсить конфигурацию")
+                }
+                val bean = beans.first()
+                bean.initializeDefaultValues()
 
-                // 4. Проверяем, что это валидный URL
-                if (!finalUrl.startsWith("http://") && !finalUrl.startsWith("https://")) {
-                    throw Exception("Сервер вернул некорректную ссылку: $finalUrl")
+                // 4. Удаляем СТАРУЮ подписочную группу, если она осталась от прошлых версий
+                val allGroups = SagerDatabase.groupDao.allGroups()
+                allGroups.find { it.name == GROUP_NAME && it.type == GroupType.SUBSCRIPTION }?.let {
+                    GroupManager.deleteGroup(it.id)
                 }
 
-                // 5. Ищем существующую группу с таким именем — если есть, не плодим новые
-                val existingGroups = SagerDatabase.groupDao.allGroups()
-                val existingGroup = existingGroups.find { it.name == "CloudNode Trial" }
-
-                val targetGroup = if (existingGroup != null) {
-                    // Обновляем ссылку в существующей группе
-                    existingGroup.subscription?.link = finalUrl
-                    GroupManager.updateGroup(existingGroup)
-                    existingGroup
+                // 5. Ищем/создаём ОБЫЧНУЮ группу BASIC и кладём в неё профиль
+                var trialGroup = allGroups.find { it.name == GROUP_NAME && it.type == GroupType.BASIC }
+                if (trialGroup == null) {
+                    trialGroup = GroupManager.createGroup(
+                        ProxyGroup(type = GroupType.BASIC, name = GROUP_NAME)
+                    )
                 } else {
-                    // Создаём новую группу
-                    val group = ProxyGroup(type = GroupType.SUBSCRIPTION, name = "CloudNode Trial")
-                    val subscription = SubscriptionBean().apply { link = finalUrl }
-                    group.subscription = subscription
-                    GroupManager.createGroup(group)
+                    GroupManager.clearGroup(trialGroup.id)
                 }
 
-                GroupUpdater.startUpdate(targetGroup, false)
-                DataStore.selectedGroup = targetGroup.id
+                val entity: ProxyEntity = ProfileManager.createProfile(trialGroup.id, bean)
 
-                // 6. Ждём загрузки профилей (до 20 сек)
-                var profiles: List<ProxyEntity> = emptyList()
-                for (i in 0 until 40) {
-                    delay(500)
-                    profiles = SagerDatabase.proxyDao.getByGroup(targetGroup.id)
-                    if (profiles.isNotEmpty()) break
-                }
+                DataStore.selectedGroup = trialGroup.id
+                DataStore.selectedProxy = entity.id
+                DataStore.currentProfile = entity.id
 
                 onMainDispatcher {
                     binding.fab.isEnabled = true
-                    if (profiles.isNotEmpty()) {
-                        val first = profiles.first()
-                        DataStore.selectedProxy = first.id
-                        DataStore.currentProfile = first.id
-                        snackbar("✅ Доступ получен! Подключаем...").show()
-                        connect.launch(null)
-                    } else {
-                        snackbar("Ошибка: сервер вернул пустую подписку").show()
-                    }
+                    snackbar("✅ Конфигурация добавлена! Подключаем...").show()
+                    connect.launch(null)
                 }
             } catch (e: Exception) {
                 onMainDispatcher {
