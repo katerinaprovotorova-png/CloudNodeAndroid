@@ -64,7 +64,7 @@ import io.nekohasekai.sagernet.ktx.launchCustomTab
 import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.ktx.parseProxies
 import io.nekohasekai.sagernet.ktx.readableMessage
-import kotlinx.coroutines.Dispatchers
+import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
@@ -223,7 +223,7 @@ class MainActivity : ThemedActivity(),
     // ================= УДАЛЕНИЕ ПОЛЬЗОВАТЕЛЯ ПРИ ОТКЛЮЧЕНИИ =================
 
     private fun deleteUserFromServer(afterDelete: () -> Unit) {
-        MainScope().launch(Dispatchers.Default) {
+        runOnDefaultDispatcher {
             try {
                 val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
                 val username = "android_$deviceId"
@@ -249,14 +249,14 @@ class MainActivity : ThemedActivity(),
         }
     }
 
-    // ================= ПОЛУЧЕНИЕ КОНФИГУРАЦИИ =================
+    // ================= ПОЛУЧЕНИЕ КОНФИГУРАЦИИ (с проверкой exists) =================
 
     private fun fetchAndConnectTrial() {
         snackbar("Проверка доступа...").show()
         binding.fab.isEnabled = false
 
-        // 🔥 ЯВНЫЙ запуск корутины, который компилятор всегда понимает правильно
-        MainScope().launch(Dispatchers.Default) {
+        // 🔥 Используем проверенный runOnDefaultDispatcher, который гарантированно компилируется в этом проекте
+        runOnDefaultDispatcher {
             try {
                 val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
                 val username = "android_$deviceId"
@@ -278,15 +278,17 @@ class MainActivity : ThemedActivity(),
                 val serverLink = checkJson.optString("direct_link", null)
                 val targetGroupId = DataStore.selectedGroup.takeIf { it > 0 } ?: 1L
 
+                // 🔥 Если пользователь активен и профиль есть — просто подключаем
                 if (exists && !serverLink.isNullOrEmpty() && DataStore.selectedProxy > 0) {
                     onMainDispatcher {
                         binding.fab.isEnabled = true
                         snackbar("Подключение...").show()
                         connect.launch(null)
                     }
-                    return@launch // 🔥 Правильный возврат из launch
+                    return@runOnDefaultDispatcher
                 }
 
+                // 🔥 Если пользователя нет (или он expired) — чистим старое и создаем нового
                 GroupManager.clearGroup(targetGroupId)
 
                 val createReq = Request.Builder()
@@ -375,7 +377,7 @@ class MainActivity : ThemedActivity(),
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         val uri = intent.data ?: return
-        MainScope().launch(Dispatchers.Default) {
+        runOnDefaultDispatcher {
             if (uri.scheme == "sn" && uri.host == "subscription" || uri.scheme == "clash") {
                 importSubscription(uri)
             } else {
@@ -419,7 +421,7 @@ class MainActivity : ThemedActivity(),
             displayFragmentWithId(R.id.nav_group)
             MaterialAlertDialogBuilder(this@MainActivity).setTitle(R.string.subscription_import)
                 .setMessage(getString(R.string.subscription_import_message, name))
-                .setPositiveButton(R.string.yes) { _, _ -> MainScope().launch(Dispatchers.Default) { finishImportSubscription(group) } }
+                .setPositiveButton(R.string.yes) { _, _ -> runOnDefaultDispatcher { finishImportSubscription(group) } }
                 .setNegativeButton(android.R.string.cancel, null)
                 .show()
         }
@@ -440,7 +442,7 @@ class MainActivity : ThemedActivity(),
         onMainDispatcher {
             MaterialAlertDialogBuilder(this@MainActivity).setTitle(R.string.profile_import)
                 .setMessage(getString(R.string.profile_import_message, profile.displayName()))
-                .setPositiveButton(R.string.yes) { _, _ -> MainScope().launch(Dispatchers.Default) { finishImportProfile(profile) } }
+                .setPositiveButton(R.string.yes) { _, _ -> runOnDefaultDispatcher { finishImportProfile(profile) } }
                 .setNegativeButton(android.R.string.cancel, null)
                 .show()
         }
@@ -568,14 +570,14 @@ class MainActivity : ThemedActivity(),
     }
 
     override fun cbTrafficUpdate(data: TrafficData) {
-        MainScope().launch(Dispatchers.Default) { ProfileManager.postUpdate(data) }
+        runOnDefaultDispatcher { ProfileManager.postUpdate(data) }
     }
 
     override fun cbSelectorUpdate(id: Long) {
         val old = DataStore.selectedProxy
         DataStore.selectedProxy = id
         DataStore.currentProfile = id
-        MainScope().launch(Dispatchers.Default) {
+        runOnDefaultDispatcher {
             ProfileManager.postUpdate(old, true)
             ProfileManager.postUpdate(id, true)
         }
