@@ -122,10 +122,10 @@ class MainActivity : ThemedActivity(),
         // --- ЛОГИКА КНОПКИ САМОЛЁТИКА ---
         binding.fab.setOnClickListener {
             if (DataStore.serviceState.canStop) {
-                // При отключении просто удаляем пользователя и останавливаем сервис (без рекламы, это хороший UX)
+                // При отключении: удаляем пользователя с сервера и останавливаем VPN
                 deleteUserFromServer { SagerNet.stopService() }
             } else {
-                // При подключении сначала показываем рекламу, затем подключаем
+                // При подключении: СНАЧАЛА показываем рекламу (пока VPN выключен, IP российский!), потом подключаем
                 showRewardedAd { fetchAndConnectTrial() }
             }
         }
@@ -337,26 +337,30 @@ class MainActivity : ThemedActivity(),
         }
     }
 
-    // ================= ТАЙМЕР СЕССИИ 60 МИН =================
+    // ================= ТАЙМЕР СЕССИИ 1 ЧАС + МОНЕТИЗАЦИЯ НА РЕКЛАМЕ =================
 
     private fun showSessionLimitDialog() {
         MaterialAlertDialogBuilder(this)
-            .setTitle("⏱ Лимит бесплатной сессии")
-            .setMessage("Бесплатное время (60 минут) истекло. Посмотрите короткую рекламу, чтобы продолжить работу.")
-            .setPositiveButton("Посмотреть рекламу") { _, _ ->
-                showRewardedAd { fetchAndConnectTrial() }
+            .setTitle("⏱ Бесплатный час истек")
+            .setMessage("Чтобы продолжить пользоваться VPN бесплатно, пожалуйста, посмотрите короткую рекламу. Это поддерживает развитие приложения!")
+            .setPositiveButton("🎬 Посмотреть рекламу (+1 час)") { _, _ ->
+                showRewardedAd { 
+                    startSessionTimer() // Запускаем таймер заново
+                    connect.launch(null) // Подключаем VPN
+                    snackbar("✅ Время продлено! Подключаем...").show()
+                }
             }
-            .setNegativeButton("Выйти") { _, _ ->
+            .setNegativeButton("Выйти и удалить данные") { _, _ ->
                 deleteUserFromServer { SagerNet.stopService() }
             }
-            .setCancelable(false)
+            .setCancelable(false) // Нельзя закрыть кнопкой "Назад", нужно сделать выбор
             .show()
     }
 
     private fun startSessionTimer() {
         sessionTimerJob?.cancel()
         sessionTimerJob = MainScope().launch {
-            delay(60 * 60 * 1000L) // 60 минут
+            delay(60 * 60 * 1000L) // Ровно 1 час (60 минут)
             if (DataStore.serviceState.canStop) {
                 SagerNet.stopService()
                 showSessionLimitDialog()
@@ -365,7 +369,7 @@ class MainActivity : ThemedActivity(),
     }
 
     // ===============================================================
-    // (Остальной код импортов, фрагментов и обработчиков остался без изменений для экономии места и сохранения стабильности)
+    // (Остальной код импортов, фрагментов и обработчиков остался без изменений)
     // ===============================================================
 
     fun refreshNavMenu(clashApi: Boolean) {
