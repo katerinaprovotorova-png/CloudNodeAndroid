@@ -91,9 +91,10 @@ class MainActivity : ThemedActivity(),
     // 🔥 Мини-API на порту 5000 — возвращает ПРЯМУЮ vless:// ссылку
     private val API_BASE_URL = "http://157.228.118.129:5000"
     private val API_KEY = "SuperSecretKey123XYZ"
-    private val GROUP_NAME = "CloudNode Trial"
 
+    // 🔥 ВРЕМЕННО для теста баннера. После активации в Яндексе верни "R-M-20422645-1"
     private val BANNER_AD_UNIT_ID = "R-M-TEST-1-VBanner"
+    // 🔥 ВРЕМЕННО для теста rewarded. После активации верни "R-M-20422645-2"
     private val REWARDED_AD_UNIT_ID = "demo-rewarded-yandex"
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -229,7 +230,7 @@ class MainActivity : ThemedActivity(),
         showRewardedAd { SagerNet.stopService() }
     }
 
-    // ================= ПОЛУЧЕНИЕ ПРЯМОЙ КОНФИГУРАЦИИ (БЕЗ ПОДПИСКИ!) =================
+    // ================= ПОЛУЧЕНИЕ ПРЯМОЙ КОНФИГУРАЦИИ (БЕЗ ЛИШНИХ ВКЛАДОК) =================
 
     private fun checkAndConnectTrialIfNeeded() {
         if (DataStore.selectedGroup > 0 && DataStore.selectedProxy > 0) {
@@ -254,7 +255,7 @@ class MainActivity : ThemedActivity(),
                     .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
                     .build()
 
-                // 1. Проверяем пользователя — мини-API вернёт ПРЯМУЮ vless:// ссылку
+                // 1. Получаем прямую ссылку
                 val checkReq = Request.Builder()
                     .url("$API_BASE_URL/check_user?username=$username")
                     .header("X-API-Key", API_KEY)
@@ -263,10 +264,9 @@ class MainActivity : ThemedActivity(),
 
                 val checkResp = client.newCall(checkReq).execute()
                 val checkJson = JSONObject(checkResp.body?.string() ?: throw Exception("Пустой ответ от сервера"))
-
                 var directLink: String? = checkJson.optString("direct_link", null)
 
-                // 2. Если пользователя нет или ссылки нет — создаём
+                // 2. Если пользователя нет — создаём
                 if (!checkJson.optBoolean("exists", false) || directLink.isNullOrEmpty()) {
                     val createReq = Request.Builder()
                         .url("$API_BASE_URL/create_user")
@@ -287,7 +287,7 @@ class MainActivity : ThemedActivity(),
                     throw Exception("Сервер не вернул прямую ссылку на конфигурацию")
                 }
 
-                // 3. Парсим ПРЯМУЮ ссылку в профиль (vless://...)
+                // 3. Парсим ссылку в профиль
                 val beans = parseProxies(directLink)
                 if (beans.isEmpty()) {
                     throw Exception("Не удалось распарсить конфигурацию")
@@ -295,25 +295,11 @@ class MainActivity : ThemedActivity(),
                 val bean = beans.first()
                 bean.initializeDefaultValues()
 
-                // 4. Удаляем СТАРУЮ подписочную группу, если она осталась от прошлых версий
-                val allGroups = SagerDatabase.groupDao.allGroups()
-                allGroups.find { it.name == GROUP_NAME && it.type == GroupType.SUBSCRIPTION }?.let {
-                    GroupManager.deleteGroup(it.id)
-                }
+                // 4. 🔥 ДОБАВЛЯЕМ В ТЕКУЩУЮ (ИЛИ ПЕРВУЮ) ГРУППУ, без создания лишних вкладок!
+                val targetGroupId = DataStore.selectedGroup.takeIf { it > 0 } ?: 1L
+                val entity: ProxyEntity = ProfileManager.createProfile(targetGroupId, bean)
 
-                // 5. Ищем/создаём ОБЫЧНУЮ группу BASIC и кладём в неё профиль
-                var trialGroup = allGroups.find { it.name == GROUP_NAME && it.type == GroupType.BASIC }
-                if (trialGroup == null) {
-                    trialGroup = GroupManager.createGroup(
-                        ProxyGroup(type = GroupType.BASIC, name = GROUP_NAME)
-                    )
-                } else {
-                    GroupManager.clearGroup(trialGroup.id)
-                }
-
-                val entity: ProxyEntity = ProfileManager.createProfile(trialGroup.id, bean)
-
-                DataStore.selectedGroup = trialGroup.id
+                DataStore.selectedGroup = targetGroupId
                 DataStore.selectedProxy = entity.id
                 DataStore.currentProfile = entity.id
 
