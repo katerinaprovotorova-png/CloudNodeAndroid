@@ -230,23 +230,19 @@ class MainActivity : ThemedActivity(),
         showRewardedAd { SagerNet.stopService() }
     }
 
-    // ================= ПОЛУЧЕНИЕ ПРЯМОЙ КОНФИГУРАЦИИ (БЕЗ ЛИШНИХ ВКЛАДОК) =================
+    // ================= ПРОВЕРКА И ПОЛУЧЕНИЕ КОНФИГУРАЦИИ =================
 
     private fun checkAndConnectTrialIfNeeded() {
-        if (DataStore.selectedGroup > 0 && DataStore.selectedProxy > 0) {
-            connect.launch(null)
-        } else {
-            fetchAndConnectTrial()
-        }
+        // ВСЕГДА сверяемся с сервером, чтобы не пытаться подключиться с удалённым/истёкшим пользователем
+        fetchAndConnectTrial()
     }
 
     private fun fetchAndConnectTrial() {
-        snackbar("Получение конфигурации...").show()
+        snackbar("Проверка доступа...").show()
         binding.fab.isEnabled = false
 
         runOnDefaultDispatcher {
             try {
-                // Уникальный username с префиксом платформы
                 val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
                 val username = "android_$deviceId"
 
@@ -255,7 +251,7 @@ class MainActivity : ThemedActivity(),
                     .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
                     .build()
 
-                // 1. Получаем прямую ссылку
+                // 1. Спрашиваем сервер: жив ли пользователь?
                 val checkReq = Request.Builder()
                     .url("$API_BASE_URL/check_user?username=$username")
                     .header("X-API-Key", API_KEY)
@@ -264,39 +260,51 @@ class MainActivity : ThemedActivity(),
 
                 val checkResp = client.newCall(checkReq).execute()
                 val checkJson = JSONObject(checkResp.body?.string() ?: throw Exception("Пустой ответ от сервера"))
-                var directLink: String? = checkJson.optString("direct_link", null)
 
-                // 2. Если пользователя нет — создаём
-                if (!checkJson.optBoolean("exists", false) || directLink.isNullOrEmpty()) {
-                    val createReq = Request.Builder()
-                        .url("$API_BASE_URL/create_user")
-                        .header("X-API-Key", API_KEY)
-                        .post("""{"username":"$username"}""".toRequestBody("application/json".toMediaType()))
-                        .build()
+                val exists = checkJson.optBoolean("exists", false)
+                val serverLink = checkJson.optString("direct_link", null)
+                val targetGroupId = DataStore.selectedGroup.takeIf { it > 0 } ?: 1L
 
-                    val createResp = client.newCall(createReq).execute()
-                    val createJson = JSONObject(createResp.body?.string() ?: throw Exception("Пустой ответ при создании"))
-
-                    if (!createJson.optBoolean("success", false)) {
-                        throw Exception("Сервер не создал пользователя: ${createJson.optString("details", "")}")
+                // 2. Если пользователь на сервере ЖИВ и в приложении есть профиль — просто подключаем
+                if (exists && !serverLink.isNullOrEmpty() && DataStore.selectedProxy > 0) {
+                    onMainDispatcher {
+                        binding.fab.isEnabled = true
+                        snackbar("Подключение...").show()
+                        connect.launch(null)
                     }
-                    directLink = createJson.optString("direct_link", null)
+                    return@runOnDefaultDispatcher
                 }
 
-                if (directLink.isNullOrEmpty()) {
+                // 3. Пользователя нет (или профиль в приложении битый/отсутствует) —
+                //    удаляем несуществующее соединение и создаём нового пользователя
+                GroupManager.clearGroup(targetGroupId)
+
+                val createReq = Request.Builder()
+                    .url("$API_BASE_URL/create_user")
+                    .header("X-API-Key", API_KEY)
+                    .post("""{"username":"$username"}""".toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                val createResp = client.newCall(createReq).execute()
+                val createJson = JSONObject(createResp.body?.string() ?: throw Exception("Пустой ответ при создании"))
+
+                if (!createJson.optBoolean("success", false)) {
+                    throw Exception("Сервер не создал пользователя: ${createJson.optString("details", "")}")
+                }
+
+                val newLink = createJson.optString("direct_link", null)
+                if (newLink.isNullOrEmpty()) {
                     throw Exception("Сервер не вернул прямую ссылку на конфигурацию")
                 }
 
-                // 3. Парсим ссылку в профиль
-                val beans = parseProxies(directLink)
+                // 4. Импортируем НОВУЮ ссылку как профиль
+                val beans = parseProxies(newLink)
                 if (beans.isEmpty()) {
                     throw Exception("Не удалось распарсить конфигурацию")
                 }
                 val bean = beans.first()
                 bean.initializeDefaultValues()
 
-                // 4. 🔥 ДОБАВЛЯЕМ В ТЕКУЩУЮ (ИЛИ ПЕРВУЮ) ГРУППУ, без создания лишних вкладок!
-                val targetGroupId = DataStore.selectedGroup.takeIf { it > 0 } ?: 1L
                 val entity: ProxyEntity = ProfileManager.createProfile(targetGroupId, bean)
 
                 DataStore.selectedGroup = targetGroupId
@@ -305,7 +313,7 @@ class MainActivity : ThemedActivity(),
 
                 onMainDispatcher {
                     binding.fab.isEnabled = true
-                    snackbar("✅ Конфигурация добавлена! Подключаем...").show()
+                    snackbar("✅ Новый пользователь создан! Подключаем...").show()
                     connect.launch(null)
                 }
             } catch (e: Exception) {
