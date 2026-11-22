@@ -124,7 +124,19 @@ class MainActivity : ThemedActivity(),
             if (DataStore.serviceState.canStop) {
                 deleteUserFromServer { SagerNet.stopService() }
             } else {
-                showRewardedAd { fetchAndConnectTrial() }
+                // ✅ Сначала проверяем, платный ли пользователь
+                checkPaidStatus { isPaid ->
+                    if (isPaid) {
+                        // Платный — подключаем без рекламы
+                        runOnUiThread {
+                            snackbar("Подключение...").show()
+                            connect.launch(null)
+                        }
+                    } else {
+                        // Бесплатный — показываем рекламу
+                        showRewardedAd { fetchAndConnectTrial() }
+                    }
+                }
             }
         }
 
@@ -187,6 +199,87 @@ class MainActivity : ThemedActivity(),
                 .setMessage(R.string.preview_version_hint)
                 .setPositiveButton(android.R.string.ok, null)
                 .show()
+        }
+    }
+
+    // ================= ПРОВЕРКА ПЛАТНОГО СТАТУСА =================
+    private fun checkPaidStatus(onResult: (Boolean) -> Unit) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
+                val username = "tg_$deviceId"
+                val client = OkHttpClient.Builder().connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS).build()
+                val req = Request.Builder()
+                    .url("$API_BASE_URL/check_paid?username=$username")
+                    .header("X-API-Key", API_KEY)
+                    .get()
+                    .build()
+                val resp = client.newCall(req).execute()
+                val json = JSONObject(resp.body?.string() ?: "{}")
+                onResult(json.optBoolean("is_paid", false))
+            } catch (e: Exception) {
+                onResult(false)
+            }
+        }
+    }
+
+    // ================= СОЗДАНИЕ МОСТА И ОТКРЫТИЕ БОТА =================
+    private fun createBridgeAndOpenBot() {
+        snackbar("Создаём временный доступ...").show()
+        binding.fab.isEnabled = false
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
+                val username = "bridge_$deviceId"
+                val client = OkHttpClient.Builder()
+                    .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+
+                val req = Request.Builder()
+                    .url("$API_BASE_URL/create_bridge")
+                    .header("X-API-Key", API_KEY)
+                    .post("""{"username":"$username"}""".toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                val resp = client.newCall(req).execute()
+                val json = JSONObject(resp.body?.string() ?: throw Exception("Пустой ответ"))
+
+                if (!json.optBoolean("success", false)) {
+                    throw Exception("Не удалось создать временный доступ")
+                }
+
+                val link = json.optString("direct_link", null)
+                if (link.isNullOrEmpty()) {
+                    throw Exception("Сервер не вернул ссылку")
+                }
+
+                // Импортируем ссылку и подключаемся
+                val beans = parseProxies(link)
+                if (beans.isEmpty()) throw Exception("Не удалось распарсить ссылку")
+                val bean = beans.first()
+                val targetGroupId = DataStore.selectedGroup.takeIf { it > 0 } ?: 1L
+                GroupManager.clearGroup(targetGroupId)
+                val entity = ProfileManager.createProfile(targetGroupId, bean)
+                DataStore.selectedGroup = targetGroupId
+                DataStore.selectedProxy = entity.id
+                DataStore.currentProfile = entity.id
+
+                runOnUiThread {
+                    binding.fab.isEnabled = true
+                    snackbar("✅ Временный доступ активирован! Открываем бота...").show()
+                    // Открываем бота с параметром from_app
+                    launchCustomTab("https://t.me/CloudNodeBot?start=from_app_android_$deviceId")
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    binding.fab.isEnabled = true
+                    snackbar("Ошибка: ${e.readableMessage}").show()
+                    // Даже если мост не создался — открываем бота
+                    launchCustomTab("https://t.me/CloudNodeBot?start=from_app")
+                }
+            }
         }
     }
 
@@ -344,7 +437,7 @@ class MainActivity : ThemedActivity(),
     private fun showSessionLimitDialog() {
         MaterialAlertDialogBuilder(this)
             .setTitle("⏱ Бесплатный час истек")
-            .setMessage("Чтобы продолжить пользоваться VPN бесплатно, посмотри короткую рекламу. Это поддерживает развитие приложения!")
+            .setMessage("Чтобы продолжить пользоваться VPN:\n\n🎬 Посмотри рекламу — получи ещё 1 час бесплатно\n\n💳 Или купи подписку от 399 ₽/мес в нашем Telegram-боте")
             .setPositiveButton("🎬 Посмотреть рекламу (+1 час)") { _, _ ->
                 showRewardedAd {
                     startSessionTimer()
@@ -352,7 +445,13 @@ class MainActivity : ThemedActivity(),
                     snackbar("✅ Время продлено! Подключаем...").show()
                 }
             }
-            .setNegativeButton("Выйти и удалить данные") { _, _ ->
+            .setNeutralButton("💳 Купить подписку") { _, _ ->
+                // Сначала показываем рекламу, потом создаём мост
+                showRewardedAd {
+                    createBridgeAndOpenBot()
+                }
+            }
+            .setNegativeButton("❌ Выйти и удалить данные") { _, _ ->
                 deleteUserFromServer { SagerNet.stopService() }
             }
             .setCancelable(false)
@@ -532,7 +631,12 @@ class MainActivity : ThemedActivity(),
         binding.stats.changeState(state)
 
         if (state == BaseService.State.Connected) {
-            startSessionTimer()
+            // ✅ Проверяем, платный ли пользователь, перед запуском таймера
+            checkPaidStatus { isPaid ->
+                if (!isPaid) {
+                    startSessionTimer()
+                }
+            }
         } else {
             sessionTimerJob?.cancel()
         }
