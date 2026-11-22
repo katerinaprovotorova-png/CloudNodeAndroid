@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.RemoteException
 import android.provider.Settings
+import android.util.Base64
 import android.view.KeyEvent
 import android.view.MenuItem
 import androidx.activity.addCallback
@@ -120,20 +121,18 @@ class MainActivity : ThemedActivity(),
             }
         }
 
+        // ✅ Логика кнопки самолётика с проверкой платного статуса
         binding.fab.setOnClickListener {
             if (DataStore.serviceState.canStop) {
                 deleteUserFromServer { SagerNet.stopService() }
             } else {
-                // ✅ Сначала проверяем, платный ли пользователь
                 checkPaidStatus { isPaid ->
                     if (isPaid) {
-                        // Платный — подключаем без рекламы
                         runOnUiThread {
                             snackbar("Подключение...").show()
                             connect.launch(null)
                         }
                     } else {
-                        // Бесплатный — показываем рекламу
                         showRewardedAd { fetchAndConnectTrial() }
                     }
                 }
@@ -152,7 +151,6 @@ class MainActivity : ThemedActivity(),
 
             binding.bannerAdView.setBannerAdEventListener(object : BannerAdEventListener {
                 override fun onAdLoaded() {
-                    // ✅ Ждём, пока баннер реально отрисует свой естественный размер
                     binding.bannerAdView.post {
                         binding.bannerAdView.post {
                             val bannerHeight = binding.bannerAdView.height
@@ -202,7 +200,7 @@ class MainActivity : ThemedActivity(),
         }
     }
 
-    // ================= ПРОВЕРКА ПЛАТНОГО СТАТУСА (БЕЗОПАСНАЯ ВЕРСИЯ) =================
+    // ================= ПРОВЕРКА ПЛАТНОГО СТАТУСА (БЕЗОПАСНАЯ) =================
     private fun checkPaidStatus(onResult: (Boolean) -> Unit) {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
@@ -226,7 +224,6 @@ class MainActivity : ThemedActivity(),
                     onResult(false)
                 }
             } catch (e: Exception) {
-                // НИКОГДА не показываем ошибку здесь — просто считаем, что пользователь бесплатный
                 onResult(false)
             }
         }
@@ -264,7 +261,6 @@ class MainActivity : ThemedActivity(),
                     throw Exception("Сервер не вернул ссылку")
                 }
 
-                // Импортируем ссылку и подключаемся
                 val beans = parseProxies(link)
                 if (beans.isEmpty()) throw Exception("Не удалось распарсить ссылку")
                 val bean = beans.first()
@@ -278,14 +274,12 @@ class MainActivity : ThemedActivity(),
                 runOnUiThread {
                     binding.fab.isEnabled = true
                     snackbar("✅ Временный доступ активирован! Открываем бота...").show()
-                    // Открываем бота с параметром from_app
                     launchCustomTab("https://t.me/CloudNodeBot?start=from_app_android_$deviceId")
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     binding.fab.isEnabled = true
                     snackbar("Ошибка: ${e.readableMessage}").show()
-                    // Даже если мост не создался — открываем бота
                     launchCustomTab("https://t.me/CloudNodeBot?start=from_app")
                 }
             }
@@ -455,7 +449,6 @@ class MainActivity : ThemedActivity(),
                 }
             }
             .setNeutralButton("💳 Купить подписку") { _, _ ->
-                // Сначала показываем рекламу, потом создаём мост
                 showRewardedAd {
                     createBridgeAndOpenBot()
                 }
@@ -486,9 +479,30 @@ class MainActivity : ThemedActivity(),
         }
     }
 
+    // ✅ ОБРАБОТКА АВТОМАТИЧЕСКОГО ИМПОРТА ПОСЛЕ ОПЛАТЫ
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         val uri = intent.data ?: return
+        
+        // Обработка автоматического импорта после оплаты через бота
+        if (uri.scheme == "https" && uri.host == "t.me" && uri.path?.startsWith("/CloudNodeBot") == true) {
+            val startParam = uri.getQueryParameter("start") ?: return
+            if (startParam.startsWith("import_")) {
+                val encodedLink = startParam.removePrefix("import_")
+                try {
+                    val linkBytes = Base64.decode(encodedLink, Base64.DEFAULT)
+                    val link = String(linkBytes)
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        importProfile(Uri.parse(link))
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread { snackbar("Ошибка импорта: ${e.readableMessage}").show() }
+                }
+                return
+            }
+        }
+        
+        // Стандартная обработка подписок и профилей
         lifecycleScope.launch(Dispatchers.IO) {
             if (uri.scheme == "sn" && uri.host == "subscription" || uri.scheme == "clash") {
                 importSubscription(uri)
@@ -609,10 +623,8 @@ class MainActivity : ThemedActivity(),
 
     @SuppressLint("CommitTransaction")
     fun displayFragment(fragment: ToolbarFragment) {
-        // ✅ Баннер и fab показываем на всех фрагментах для максимизации показов
         binding.stats.allowShow = true
         binding.fab.show()
-
         supportFragmentManager.beginTransaction().replace(R.id.fragment_holder, fragment).commitAllowingStateLoss()
         binding.drawerLayout.closeDrawers()
     }
@@ -640,7 +652,6 @@ class MainActivity : ThemedActivity(),
         binding.stats.changeState(state)
 
         if (state == BaseService.State.Connected) {
-            // ✅ Проверяем, платный ли пользователь, перед запуском таймера
             checkPaidStatus { isPaid ->
                 if (!isPaid) {
                     startSessionTimer()
