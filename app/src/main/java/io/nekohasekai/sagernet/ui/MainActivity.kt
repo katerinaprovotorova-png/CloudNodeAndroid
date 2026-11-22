@@ -207,8 +207,8 @@ class MainActivity : ThemedActivity(),
                 val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
                 val username = "tg_$deviceId"
                 val client = OkHttpClient.Builder()
-                    .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
-                    .readTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+                    .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
                     .build()
                 val req = Request.Builder()
                     .url("$API_BASE_URL/check_paid?username=$username")
