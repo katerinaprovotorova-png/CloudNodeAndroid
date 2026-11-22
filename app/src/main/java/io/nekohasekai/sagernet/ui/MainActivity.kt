@@ -91,9 +91,9 @@ class MainActivity : ThemedActivity(),
     private val API_BASE_URL = "http://157.228.118.129:5000"
     private val API_KEY = "SuperSecretKey123XYZ"
 
-    // ⚠️ Если баннер не показывается, замени "R-M-TEST-1-VBanner" на "R-M-20422645-1"
-    private val BANNER_AD_UNIT_ID = "R-M-TEST-1-VBanner"
-    private val REWARDED_AD_UNIT_ID = "demo-rewarded-yandex"
+    // ✅ Боевые ID рекламы
+    private val BANNER_AD_UNIT_ID = "R-M-20422645-1"
+    private val REWARDED_AD_UNIT_ID = "R-M-20422645-2"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -132,6 +132,7 @@ class MainActivity : ThemedActivity(),
 
         setContentView(binding.root)
 
+        // ✅ Инициализация рекламы
         MobileAds.initialize(this) {
             binding.bannerAdView.setAdUnitId(BANNER_AD_UNIT_ID)
             val adWidthPx = resources.displayMetrics.widthPixels
@@ -140,6 +141,14 @@ class MainActivity : ThemedActivity(),
             binding.bannerAdView.setBannerAdEventListener(object : BannerAdEventListener {
                 override fun onAdLoaded() {
                     binding.bannerAdView.post {
+                        // ✅ Фиксируем минимальную высоту баннера, чтобы он не сжимался
+                        val minHeight = (50 * resources.displayMetrics.density).toInt()
+                        if (binding.bannerAdView.height < minHeight) {
+                            val lp = binding.bannerAdView.layoutParams
+                            lp.height = minHeight
+                            binding.bannerAdView.layoutParams = lp
+                        }
+                        
                         val lp = binding.stats.layoutParams as CoordinatorLayout.LayoutParams
                         lp.bottomMargin = binding.bannerAdView.height + 8
                         binding.stats.layoutParams = lp
@@ -224,7 +233,6 @@ class MainActivity : ThemedActivity(),
     // ================= УДАЛЕНИЕ ПОЛЬЗОВАТЕЛЯ ПРИ ОТКЛЮЧЕНИИ =================
 
     private fun deleteUserFromServer(afterDelete: () -> Unit) {
-        // Используем lifecycleScope, который гарантированно создает корутину
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
@@ -257,7 +265,6 @@ class MainActivity : ThemedActivity(),
         snackbar("Проверка доступа...").show()
         binding.fab.isEnabled = false
 
-        // Используем lifecycleScope, который гарантированно создает корутину и компилируется
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
@@ -497,14 +504,10 @@ class MainActivity : ThemedActivity(),
 
     @SuppressLint("CommitTransaction")
     fun displayFragment(fragment: ToolbarFragment) {
-        if (fragment is ConfigurationFragment) {
-            binding.stats.allowShow = true
-            binding.fab.show()
-        } else if (!DataStore.showBottomBar) {
-            binding.stats.allowShow = false
-            binding.stats.performHide()
-            binding.fab.hide()
-        }
+        // ✅ Баннер показывается на всех фрагментах, не только на ConfigurationFragment
+        binding.stats.allowShow = true
+        binding.fab.show()
+        
         supportFragmentManager.beginTransaction().replace(R.id.fragment_holder, fragment).commitAllowingStateLoss()
         binding.drawerLayout.closeDrawers()
     }
