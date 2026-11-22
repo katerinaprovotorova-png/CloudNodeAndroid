@@ -89,7 +89,7 @@ class MainActivity : ThemedActivity(),
     private var rewardedAdLoader: RewardedAdLoader? = null
     private var rewardedAd: RewardedAd? = null
 
-    private val API_BASE_URL = "http://157.228.118.129:5000"
+    private val API_BASE_URL = "https://cloudnodes.ru/api"
     private val API_KEY = "SuperSecretKey123XYZ"
 
     // ✅ Боевые ID рекламы
