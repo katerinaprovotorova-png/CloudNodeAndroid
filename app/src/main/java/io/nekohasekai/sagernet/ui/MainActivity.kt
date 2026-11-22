@@ -202,22 +202,31 @@ class MainActivity : ThemedActivity(),
         }
     }
 
-    // ================= ПРОВЕРКА ПЛАТНОГО СТАТУСА =================
+    // ================= ПРОВЕРКА ПЛАТНОГО СТАТУСА (БЕЗОПАСНАЯ ВЕРСИЯ) =================
     private fun checkPaidStatus(onResult: (Boolean) -> Unit) {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
                 val username = "tg_$deviceId"
-                val client = OkHttpClient.Builder().connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS).build()
+                val client = OkHttpClient.Builder()
+                    .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
                 val req = Request.Builder()
                     .url("$API_BASE_URL/check_paid?username=$username")
                     .header("X-API-Key", API_KEY)
                     .get()
                     .build()
                 val resp = client.newCall(req).execute()
-                val json = JSONObject(resp.body?.string() ?: "{}")
-                onResult(json.optBoolean("is_paid", false))
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string() ?: "{}"
+                    val json = JSONObject(body)
+                    onResult(json.optBoolean("is_paid", false))
+                } else {
+                    onResult(false)
+                }
             } catch (e: Exception) {
+                // НИКОГДА не показываем ошибку здесь — просто считаем, что пользователь бесплатный
                 onResult(false)
             }
         }
