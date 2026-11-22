@@ -132,7 +132,7 @@ class MainActivity : ThemedActivity(),
 
         setContentView(binding.root)
 
-        // ✅ Инициализация рекламы
+        // ✅ Инициализация рекламы с естественным размером баннера
         MobileAds.initialize(this) {
             binding.bannerAdView.setAdUnitId(BANNER_AD_UNIT_ID)
             val adWidthPx = resources.displayMetrics.widthPixels
@@ -140,18 +140,15 @@ class MainActivity : ThemedActivity(),
 
             binding.bannerAdView.setBannerAdEventListener(object : BannerAdEventListener {
                 override fun onAdLoaded() {
+                    // ✅ Ждём, пока баннер реально отрисует свой естественный размер
                     binding.bannerAdView.post {
-                        // ✅ Фиксируем минимальную высоту баннера, чтобы он не сжимался
-                        val minHeight = (50 * resources.displayMetrics.density).toInt()
-                        if (binding.bannerAdView.height < minHeight) {
-                            val lp = binding.bannerAdView.layoutParams
-                            lp.height = minHeight
-                            binding.bannerAdView.layoutParams = lp
+                        binding.bannerAdView.post {
+                            val bannerHeight = binding.bannerAdView.height
+                            val extraMargin = (8 * resources.displayMetrics.density).toInt()
+                            val lp = binding.stats.layoutParams as CoordinatorLayout.LayoutParams
+                            lp.bottomMargin = bannerHeight + extraMargin
+                            binding.stats.layoutParams = lp
                         }
-                        
-                        val lp = binding.stats.layoutParams as CoordinatorLayout.LayoutParams
-                        lp.bottomMargin = binding.bannerAdView.height + 8
-                        binding.stats.layoutParams = lp
                     }
                 }
                 override fun onAdFailedToLoad(error: AdRequestError) {
@@ -504,10 +501,10 @@ class MainActivity : ThemedActivity(),
 
     @SuppressLint("CommitTransaction")
     fun displayFragment(fragment: ToolbarFragment) {
-        // ✅ Баннер показывается на всех фрагментах, не только на ConfigurationFragment
+        // ✅ Баннер и fab показываем на всех фрагментах для максимизации показов
         binding.stats.allowShow = true
         binding.fab.show()
-        
+
         supportFragmentManager.beginTransaction().replace(R.id.fragment_holder, fragment).commitAllowingStateLoss()
         binding.drawerLayout.closeDrawers()
     }
