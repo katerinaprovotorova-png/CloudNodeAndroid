@@ -89,6 +89,7 @@ class MainActivity : ThemedActivity(),
     private var rewardedAdLoader: RewardedAdLoader? = null
     private var rewardedAd: RewardedAd? = null
 
+    // ✅ URL API через Nginx прокси (HTTPS 443)
     private val API_BASE_URL = "https://cloudnodes.ru/api"
     private val API_KEY = "SuperSecretKey123XYZ"
 
@@ -206,9 +207,12 @@ class MainActivity : ThemedActivity(),
             try {
                 val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
                 val username = "tg_$deviceId"
+                
+                android.util.Log.d("CloudNode", "CHECK_PAID URL: $API_BASE_URL/check_paid?username=$username")
+
                 val client = OkHttpClient.Builder()
-                    .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-                    .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
                     .build()
                 val req = Request.Builder()
                     .url("$API_BASE_URL/check_paid?username=$username")
@@ -216,14 +220,19 @@ class MainActivity : ThemedActivity(),
                     .get()
                     .build()
                 val resp = client.newCall(req).execute()
+                val body = resp.body?.string() ?: "{}"
+                
+                android.util.Log.d("CloudNode", "CHECK_PAID RESPONSE: $body")
+
                 if (resp.isSuccessful) {
-                    val body = resp.body?.string() ?: "{}"
                     val json = JSONObject(body)
                     onResult(json.optBoolean("is_paid", false))
                 } else {
+                    android.util.Log.e("CloudNode", "CHECK_PAID HTTP ERROR: ${resp.code}")
                     onResult(false)
                 }
             } catch (e: Exception) {
+                android.util.Log.e("CloudNode", "CHECK_PAID EXCEPTION", e)
                 onResult(false)
             }
         }
@@ -352,7 +361,7 @@ class MainActivity : ThemedActivity(),
         }
     }
 
-    // ================= ПОЛУЧЕНИЕ КОНФИГУРАЦИИ =================
+    // ================= ПОЛУЧЕНИЕ КОНФИГУРАЦИИ С ЛОГИРОВАНИЕМ =================
 
     private fun fetchAndConnectTrial() {
         snackbar("Проверка доступа...").show()
@@ -362,20 +371,30 @@ class MainActivity : ThemedActivity(),
             try {
                 val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
                 val username = "android_$deviceId"
+                
+                android.util.Log.d("CloudNode", "API_BASE_URL: $API_BASE_URL")
+                android.util.Log.d("CloudNode", "Username: $username")
+
                 val client = OkHttpClient.Builder()
                     .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
                     .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
                     .build()
 
+                // 1. Проверяем существующего пользователя
+                val checkUrl = "$API_BASE_URL/check_user?username=$username"
+                android.util.Log.d("CloudNode", "CHECK URL: $checkUrl")
+                
                 val checkReq = Request.Builder()
-                    .url("$API_BASE_URL/check_user?username=$username")
+                    .url(checkUrl)
                     .header("X-API-Key", API_KEY)
                     .get()
                     .build()
 
                 val checkResp = client.newCall(checkReq).execute()
-                val checkJson = JSONObject(checkResp.body?.string() ?: throw Exception("Пустой ответ от сервера"))
+                val checkBody = checkResp.body?.string() ?: throw Exception("Пустой ответ от check_user")
+                android.util.Log.d("CloudNode", "CHECK RESPONSE: $checkBody")
 
+                val checkJson = JSONObject(checkBody)
                 val exists = checkJson.optBoolean("exists", false)
                 val serverLink = checkJson.optString("direct_link", null)
                 val targetGroupId = DataStore.selectedGroup.takeIf { it > 0 } ?: 1L
@@ -389,24 +408,32 @@ class MainActivity : ThemedActivity(),
                     return@launch
                 }
 
+                // 2. Создаем нового пользователя
                 GroupManager.clearGroup(targetGroupId)
 
+                val createUrl = "$API_BASE_URL/create_user"
+                android.util.Log.d("CloudNode", "CREATE URL: $createUrl")
+
                 val createReq = Request.Builder()
-                    .url("$API_BASE_URL/create_user")
+                    .url(createUrl)
                     .header("X-API-Key", API_KEY)
                     .post("""{"username":"$username"}""".toRequestBody("application/json".toMediaType()))
                     .build()
 
                 val createResp = client.newCall(createReq).execute()
-                val createJson = JSONObject(createResp.body?.string() ?: throw Exception("Пустой ответ при создании"))
+                val createBody = createResp.body?.string() ?: throw Exception("Пустой ответ от create_user")
+                android.util.Log.d("CloudNode", "CREATE RESPONSE: $createBody")
+
+                val createJson = JSONObject(createBody)
 
                 if (!createJson.optBoolean("success", false)) {
-                    throw Exception("Сервер не создал пользователя: ${createJson.optString("details", "")}")
+                    val details = createJson.optString("details", createJson.optString("error", "Неизвестная ошибка"))
+                    throw Exception("Сервер не создал пользователя: $details")
                 }
 
                 val newLink = createJson.optString("direct_link", null)
                 if (newLink.isNullOrEmpty()) {
-                    throw Exception("Сервер не вернул прямую ссылку на конфигурацию")
+                    throw Exception("Сервер вернул success=true, но не дал ссылку")
                 }
 
                 val beans = parseProxies(newLink)
@@ -427,6 +454,7 @@ class MainActivity : ThemedActivity(),
                     connect.launch(null)
                 }
             } catch (e: Exception) {
+                android.util.Log.e("CloudNode", "FATAL ERROR", e)
                 runOnUiThread {
                     binding.fab.isEnabled = true
                     snackbar("Ошибка: ${e.readableMessage}").show()
@@ -440,7 +468,7 @@ class MainActivity : ThemedActivity(),
     private fun showSessionLimitDialog() {
         MaterialAlertDialogBuilder(this)
             .setTitle("⏱ Бесплатный час истек")
-            .setMessage("Чтобы продолжить пользоваться VPN:\n\n🎬 Посмотри рекламу — получи ещё 1 час бесплатно\n\n💳 Или купи подписку от 399 ₽/мес в нашем Telegram-боте")
+            .setMessage("Чтобы продолжить пользоваться VPN:\n\n🎬 Посмотри рекламу — получи ещё 1 час бесплатно\n\n💳 Или купи подписку от 99 ₽/мес в нашем Telegram-боте")
             .setPositiveButton("🎬 Посмотреть рекламу (+1 час)") { _, _ ->
                 showRewardedAd {
                     startSessionTimer()
