@@ -198,26 +198,12 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
         }
 
-        // CloudNode package card
+        // CloudNode package card: visibility only.
+        // Dynamic values are populated later from the server API.
         val packageCard = view.findViewById<com.google.android.material.card.MaterialCardView>(
             R.id.cloudNodePackageCard
         )
-        val timeValue = view.findViewById<TextView>(R.id.cloudNodeTimeValue)
-        val trafficValue = view.findViewById<TextView>(R.id.cloudNodeTrafficValue)
-        val trafficProgress =
-            view.findViewById<com.google.android.material.progressindicator.LinearProgressIndicator>(
-                R.id.cloudNodeTrafficProgress
-            )
-        val packageStatus = view.findViewById<TextView>(R.id.cloudNodePackageStatus)
-
-        // Do not show the package card on profile selection screens
         packageCard.isVisible = !select
-
-        // Until backend integration, show that server data is not loaded
-        timeValue.text = "Ожидание данных сервера"
-        trafficValue.text = "Ожидание данных сервера"
-        trafficProgress.progress = 0
-        packageStatus.text = "Статус: проверка доступа"
 
         groupPager = view.findViewById(R.id.group_pager)
         tabLayout = view.findViewById(R.id.group_tab)
