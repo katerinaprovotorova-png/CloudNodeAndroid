@@ -198,11 +198,12 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
         }
 
-        // CloudNode package card: visibility only.
-        // Dynamic values are populated later from the server API.
+        // CloudNode package card
         val packageCard = view.findViewById<com.google.android.material.card.MaterialCardView>(
             R.id.cloudNodePackageCard
         )
+
+        // Hide the package card on profile selection screens
         packageCard.isVisible = !select
 
         groupPager = view.findViewById(R.id.group_pager)
