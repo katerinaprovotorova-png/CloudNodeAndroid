@@ -67,8 +67,7 @@ import io.nekohasekai.sagernet.ktx.parseProxies
 import io.nekohasekai.sagernet.ktx.readableMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.MainScope
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import moe.matsuri.nb4a.utils.Util
 import okhttp3.MediaType.Companion.toMediaType
@@ -76,6 +75,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.util.UUID
 
 class MainActivity : ThemedActivity(),
     SagerConnection.Callback,
@@ -85,23 +85,11 @@ class MainActivity : ThemedActivity(),
     lateinit var binding: LayoutMainBinding
     lateinit var navigation: NavigationView
 
-    private var sessionTimerJob: Job? = null
-    private var rewardedAdLoader: RewardedAdLoader? = null
-    private var rewardedAd: RewardedAd? = null
+    private var sessionStatusJob: Job? = null
+    private var sessionEndHandled = false
+    private var lastSessionEndReason: String? = null
 
-    private val FREE_SESSION_DURATION_MS = 30 * 60 * 1000L
-    private val FREE_TRAFFIC_LIMIT_BYTES = 250L * 1024L * 1024L
-    private val sessionPrefs by lazy {
-        getSharedPreferences("cloudnode_free_session", MODE_PRIVATE)
-    }
-    private var lastReportedTrafficBytes = 0L
-    private var trafficLimitReached = false
-    private var sessionEndReason: String? = null
-
-    // ✅ URL API через Nginx прокси (HTTPS 443)
-    private val API_BASE_URL = "https://cloudnodes.ru/api"
-    private val API_KEY = "SuperSecretKey123XYZ"
-
+    // Все лимиты, сроки и состояние бесплатной сессии находятся только на сервере.
     // ✅ Боевые ID рекламы
     private val BANNER_AD_UNIT_ID = "R-M-20422645-1"
     private val REWARDED_AD_UNIT_ID = "R-M-20422645-2"
@@ -131,23 +119,17 @@ class MainActivity : ThemedActivity(),
             }
         }
 
-        // ✅ Логика кнопки самолётика с проверкой платного статуса
+        // Сервер решает, кому доступен Premium и когда начинать бесплатную сессию.
         binding.fab.setOnClickListener {
             if (DataStore.serviceState.canStop) {
-                clearFreeSession()
                 deleteUserFromServer { SagerNet.stopService() }
             } else {
                 checkPaidStatus { isPaid ->
                     if (isPaid) {
-                        runOnUiThread {
-                            snackbar("Подключение...").show()
-                            connect.launch(null)
-                        }
+                        snackbar("Подключение...").show()
+                        connect.launch(null)
                     } else {
-                        showRewardedAd {
-                            startNewFreeSession()
-                            fetchAndConnectTrial()
-                        }
+                        startFreeSession()
                     }
                 }
             }
@@ -214,36 +196,15 @@ class MainActivity : ThemedActivity(),
         }
     }
 
-    // ================= ПРОВЕРКА ПЛАТНОГО СТАТУСА (БЕЗОПАСНАЯ) =================
+    // ================= ПРОВЕРКА ПЛАТНОГО СТАТУСА =================
     private fun checkPaidStatus(onResult: (Boolean) -> Unit) {
         lifecycleScope.launch(Dispatchers.IO) {
             val isPaid = try {
-                val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
-                val username = "tg_$deviceId"
-                val client = OkHttpClient.Builder()
-                    .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-                    .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-                    .build()
-                val req = Request.Builder()
-                    .url("$API_BASE_URL/check_paid?username=$username")
-                    .header("X-API-Key", API_KEY)
-                    .get()
-                    .build()
-
-                client.newCall(req).execute().use { response ->
-                    val body = response.body?.string() ?: "{}"
-                    if (response.isSuccessful) {
-                        JSONObject(body).optBoolean("is_paid", false)
-                    } else {
-                        android.util.Log.e("CloudNode", "CHECK_PAID HTTP ERROR: ${response.code}")
-                        false
-                    }
-                }
+                CloudNodeApi.isPaid(this@MainActivity)
             } catch (e: Exception) {
-                android.util.Log.e("CloudNode", "CHECK_PAID EXCEPTION", e)
+                android.util.Log.e("CloudNode", "PAID STATUS ERROR", e)
                 false
             }
-
             runOnUiThread {
                 if (!isFinishing && !isDestroyed) onResult(isPaid)
             }
@@ -258,43 +219,22 @@ class MainActivity : ThemedActivity(),
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
-                val username = "bridge_$deviceId"
-                val client = OkHttpClient.Builder()
-                    .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-                    .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-                    .build()
-
-                val req = Request.Builder()
-                    .url("$API_BASE_URL/create_bridge")
-                    .header("X-API-Key", API_KEY)
-                    .post("""{"username":"$username"}""".toRequestBody("application/json".toMediaType()))
-                    .build()
-
-                val resp = client.newCall(req).execute()
-                val json = JSONObject(resp.body?.string() ?: throw Exception("Пустой ответ"))
-
-                if (!json.optBoolean("success", false)) {
-                    throw Exception("Не удалось создать временный доступ")
-                }
-
-                val link = json.optString("direct_link", null)
-                if (link.isNullOrEmpty()) {
-                    throw Exception("Сервер не вернул ссылку")
-                }
+                val json = CloudNodeApi.createBridge(this@MainActivity)
+                val link = json.optString("profile_link", json.optString("direct_link"))
+                if (link.isBlank()) throw Exception("Сервер не вернул ссылку")
 
                 val beans = parseProxies(link)
                 if (beans.isEmpty()) throw Exception("Не удалось распарсить ссылку")
-                val bean = beans.first()
                 val targetGroupId = DataStore.selectedGroup.takeIf { it > 0 } ?: 1L
                 GroupManager.clearGroup(targetGroupId)
-                val entity = ProfileManager.createProfile(targetGroupId, bean)
+                val entity = ProfileManager.createProfile(targetGroupId, beans.first())
                 DataStore.selectedGroup = targetGroupId
                 DataStore.selectedProxy = entity.id
                 DataStore.currentProfile = entity.id
 
                 runOnUiThread {
                     binding.fab.isEnabled = true
-                    snackbar("✅ Временный доступ активирован! Открываем бота...").show()
+                    snackbar("Временный доступ активирован! Открываем бота...").show()
                     launchCustomTab("https://t.me/CloudNodeBot?start=from_app_android_$deviceId")
                 }
             } catch (e: Exception) {
@@ -367,155 +307,150 @@ class MainActivity : ThemedActivity(),
         ad.show(this)
     }
 
-    // ================= УДАЛЕНИЕ ПОЛЬЗОВАТЕЛЯ ПРИ ОТКЛЮЧЕНИИ =================
-
+    // ================= ЗАВЕРШЕНИЕ БЕСПЛАТНОЙ СЕССИИ =================
     private fun deleteUserFromServer(afterDelete: () -> Unit) {
+        sessionStatusJob?.cancel()
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
-                val username = "android_$deviceId"
-                val client = OkHttpClient.Builder().connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS).build()
-                val deleteReq = Request.Builder()
-                    .url("$API_BASE_URL/delete_user?username=$username")
-                    .header("X-API-Key", API_KEY)
-                    .delete()
-                    .build()
-
-                client.newCall(deleteReq).enqueue(object : okhttp3.Callback {
-                    override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
-                        runOnUiThread { afterDelete() }
-                    }
-                    override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
-                        response.close()
-                        runOnUiThread { afterDelete() }
-                    }
-                })
+                CloudNodeApi.stopSession(this@MainActivity)
             } catch (e: Exception) {
+                android.util.Log.e("CloudNode", "SESSION STOP ERROR", e)
+            } finally {
                 runOnUiThread { afterDelete() }
             }
         }
     }
 
-    // ================= ПОЛУЧЕНИЕ КОНФИГУРАЦИИ С ЛОГИРОВАНИЕМ =================
-
-    private fun fetchAndConnectTrial() {
-        snackbar("Проверка доступа...").show()
+    // ================= СТАРТ СЕССИИ НА СЕРВЕРЕ =================
+    private fun startFreeSession() {
+        snackbar("Проверяем бесплатный доступ...").show()
         binding.fab.isEnabled = false
-
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
-                val username = "android_$deviceId"
-                
-                android.util.Log.d("CloudNode", "API_BASE_URL: $API_BASE_URL")
-                android.util.Log.d("CloudNode", "Username: $username")
-
-                val client = OkHttpClient.Builder()
-                    .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-                    .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-                    .build()
-
-                // 1. Проверяем существующего пользователя
-                val checkUrl = "$API_BASE_URL/check_user?username=$username"
-                android.util.Log.d("CloudNode", "CHECK URL: $checkUrl")
-                
-                val checkReq = Request.Builder()
-                    .url(checkUrl)
-                    .header("X-API-Key", API_KEY)
-                    .get()
-                    .build()
-
-                val checkResp = client.newCall(checkReq).execute()
-                val checkBody = checkResp.body?.string() ?: throw Exception("Пустой ответ от check_user")
-                android.util.Log.d("CloudNode", "CHECK RESPONSE: $checkBody")
-
-                val checkJson = JSONObject(checkBody)
-                val exists = checkJson.optBoolean("exists", false)
-                val serverLink = checkJson.optString("direct_link", null)
-                val targetGroupId = DataStore.selectedGroup.takeIf { it > 0 } ?: 1L
-
-                if (exists && !serverLink.isNullOrEmpty() && DataStore.selectedProxy > 0) {
+                val result = CloudNodeApi.startSession(this@MainActivity)
+                if (!result.optBoolean("success", true)) {
+                    throw Exception(result.optString("detail", "Бесплатный доступ недоступен"))
+                }
+                val link = result.optString("profile_link", result.optString("direct_link"))
+                if (link.isNotBlank()) {
+                    installProfileAndConnect(link)
+                } else if (DataStore.selectedProxy > 0) {
                     runOnUiThread {
                         binding.fab.isEnabled = true
-                        snackbar("Подключение...").show()
                         connect.launch(null)
                     }
-                    return@launch
-                }
-
-                // 2. Создаем нового пользователя
-                GroupManager.clearGroup(targetGroupId)
-
-                val createUrl = "$API_BASE_URL/create_user"
-                android.util.Log.d("CloudNode", "CREATE URL: $createUrl")
-
-                val createReq = Request.Builder()
-                    .url(createUrl)
-                    .header("X-API-Key", API_KEY)
-                    .post("""{"username":"$username"}""".toRequestBody("application/json".toMediaType()))
-                    .build()
-
-                val createResp = client.newCall(createReq).execute()
-                val createBody = createResp.body?.string() ?: throw Exception("Пустой ответ от create_user")
-                android.util.Log.d("CloudNode", "CREATE RESPONSE: $createBody")
-
-                val createJson = JSONObject(createBody)
-
-                if (!createJson.optBoolean("success", false)) {
-                    val details = createJson.optString("details", createJson.optString("error", "Неизвестная ошибка"))
-                    throw Exception("Сервер не создал пользователя: $details")
-                }
-
-                val newLink = createJson.optString("direct_link", null)
-                if (newLink.isNullOrEmpty()) {
-                    throw Exception("Сервер вернул success=true, но не дал ссылку")
-                }
-
-                val beans = parseProxies(newLink)
-                if (beans.isEmpty()) {
-                    throw Exception("Не удалось распарсить конфигурацию")
-                }
-                val bean = beans.first()
-
-                val entity: ProxyEntity = ProfileManager.createProfile(targetGroupId, bean)
-
-                DataStore.selectedGroup = targetGroupId
-                DataStore.selectedProxy = entity.id
-                DataStore.currentProfile = entity.id
-
-                runOnUiThread {
-                    binding.fab.isEnabled = true
-                    snackbar("✅ Доступ получен! Подключаем...").show()
-                    connect.launch(null)
+                } else {
+                    throw Exception("Сервер не вернул VPN-конфигурацию")
                 }
             } catch (e: Exception) {
-                android.util.Log.e("CloudNode", "FATAL ERROR", e)
                 runOnUiThread {
                     binding.fab.isEnabled = true
-                    snackbar("Ошибка: ${e.readableMessage}").show()
+                    snackbar("Не удалось получить доступ: ${e.readableMessage}").show()
                 }
             }
         }
     }
 
-    // ================= БЕСПЛАТНАЯ СЕССИЯ: 30 МИНУТ / 250 МБ =================
+    private fun installProfileAndConnect(link: String) {
+        val beans = parseProxies(link)
+        if (beans.isEmpty()) throw Exception("Не удалось распарсить VPN-конфигурацию")
+        val targetGroupId = DataStore.selectedGroup.takeIf { it > 0 } ?: 1L
+        GroupManager.clearGroup(targetGroupId)
+        val entity = ProfileManager.createProfile(targetGroupId, beans.first())
+        DataStore.selectedGroup = targetGroupId
+        DataStore.selectedProxy = entity.id
+        DataStore.currentProfile = entity.id
+        runOnUiThread {
+            binding.fab.isEnabled = true
+            snackbar("Доступ получен. Подключаем...").show()
+            connect.launch(null)
+        }
+    }
 
+    // ================= СЕРВЕРНЫЙ МОНИТОРИНГ СЕССИИ =================
+    private fun startSessionStatusPolling() {
+        sessionStatusJob?.cancel()
+        sessionEndHandled = false
+        sessionStatusJob = lifecycleScope.launch(Dispatchers.IO) {
+            while (isActive && !isFinishing && !isDestroyed) {
+                try {
+                    val status = CloudNodeApi.sessionStatus(this@MainActivity)
+                    val paid = status.optBoolean("is_paid", false)
+                    val active = status.optString("status") == "active" &&
+                        status.optBoolean("active", true)
+                    val usedBytes = status.optLong("used_bytes", 0L).coerceAtLeast(0L)
+                    val remainingBytes = status.optLong("remaining_bytes", 0L).coerceAtLeast(0L)
+                    val remainingMs = status.optLong("remaining_seconds", 0L).coerceAtLeast(0L) * 1000L
+                    val reason = status.optString("end_reason").takeUnless { it == "null" || it.isBlank() }
+
+                    runOnUiThread {
+                        if (paid) {
+                            sessionStatusJob?.cancel()
+                        } else if (active) {
+                            lastSessionEndReason = null
+                            sessionEndHandled = false
+                            binding.stats.updateCloudNodeStatus(usedBytes, remainingBytes, remainingMs)
+                        } else if (!sessionEndHandled) {
+                            lastSessionEndReason = reason
+                            if (reason == "traffic" || reason == "time") {
+                                sessionEndHandled = true
+                                SagerNet.stopService()
+                                if (reason == "traffic") showTrafficLimitDialog() else showSessionLimitDialog()
+                            } else if (DataStore.serviceState.connected) {
+                                sessionEndHandled = true
+                                SagerNet.stopService()
+                                snackbar("Бесплатный доступ завершён. Нажмите кнопку подключения, чтобы проверить доступ.").show()
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("CloudNode", "SESSION STATUS ERROR", e)
+                }
+                delay(5000L)
+            }
+        }
+    }
+
+    private fun claimReward(rewardType: String) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val result = CloudNodeApi.claimReward(
+                    this@MainActivity,
+                    UUID.randomUUID().toString(),
+                    rewardType
+                )
+                if (!result.optBoolean("success", false)) {
+                    throw Exception(result.optString("detail", "Сервер не подтвердил награду"))
+                }
+                val link = result.optString("profile_link", result.optString("direct_link"))
+                sessionEndHandled = false
+                if (link.isNotBlank()) {
+                    installProfileAndConnect(link)
+                } else {
+                    runOnUiThread {
+                        snackbar("Награда начислена сервером. Подключаем...").show()
+                        connect.launch(null)
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    snackbar("Награда не начислена: ${e.readableMessage}").show()
+                }
+            }
+        }
+    }
+
+    // ================= ПРЕДЛОЖЕНИЕ ПРОДЛИТЬ ДОСТУП =================
     private fun showSessionLimitDialog() {
         if (isFinishing || isDestroyed) return
         MaterialAlertDialogBuilder(this)
-            .setTitle("⏱ Бесплатные 30 минут истекли")
-            .setMessage("Чтобы продолжить пользоваться VPN, посмотрите рекламу и получите новые 30 минут и дополнительный трафик. Либо перейдите к покупке Premium.")
-            .setPositiveButton("🎬 Ещё 30 минут за рекламу") { _, _ ->
-                showRewardedAd {
-                    startNewFreeSession()
-                    fetchAndConnectTrial()
-                }
+            .setTitle("Бесплатное время закончилось")
+            .setMessage("Посмотрите рекламу, чтобы получить новую бесплатную сессию. Или перейдите к покупке Premium.")
+            .setPositiveButton("Посмотреть рекламу") { _, _ ->
+                showRewardedAd { claimReward("new_session") }
             }
-            .setNeutralButton("💳 Купить Premium") { _, _ ->
-                createBridgeAndOpenBot()
-            }
-            .setNegativeButton("❌ Завершить и удалить доступ") { _, _ ->
-                clearFreeSession()
+            .setNeutralButton("Купить Premium") { _, _ -> createBridgeAndOpenBot() }
+            .setNegativeButton("Завершить") { _, _ ->
                 deleteUserFromServer { SagerNet.stopService() }
             }
             .setCancelable(false)
@@ -525,115 +460,17 @@ class MainActivity : ThemedActivity(),
     private fun showTrafficLimitDialog() {
         if (isFinishing || isDestroyed) return
         MaterialAlertDialogBuilder(this)
-            .setTitle("📶 Пакет трафика израсходован")
-            .setMessage("VPN отключён. Посмотрите рекламу, чтобы получить дополнительный трафик. Оставшееся время текущей сессии сохранится.")
-            .setPositiveButton("🎬 Получить дополнительный трафик") { _, _ ->
-                showRewardedAd {
-                    val currentLimit = sessionPrefs.getLong("traffic_limit_bytes", FREE_TRAFFIC_LIMIT_BYTES)
-                    sessionPrefs.edit()
-                        .putLong("traffic_limit_bytes", currentLimit + FREE_TRAFFIC_LIMIT_BYTES)
-                        .apply()
-                    trafficLimitReached = false
-                    sessionEndReason = null
-                    lastReportedTrafficBytes = 0L
-
-                    if (sessionPrefs.getLong("deadline_at", 0L) > System.currentTimeMillis()) {
-                        snackbar("Награда подтверждена: дополнительный трафик начислен. Подключаем...").show()
-                        connect.launch(null)
-                    } else {
-                        showSessionLimitDialog()
-                    }
-                }
+            .setTitle("Трафик бесплатной сессии израсходован")
+            .setMessage("VPN отключён. Посмотрите рекламу, чтобы добавить трафик. Оставшееся время сессии сохранится.")
+            .setPositiveButton("Получить дополнительный трафик") { _, _ ->
+                showRewardedAd { claimReward("traffic_extension") }
             }
-            .setNeutralButton("💳 Купить Premium") { _, _ ->
-                createBridgeAndOpenBot()
-            }
-            .setNegativeButton("❌ Завершить и удалить доступ") { _, _ ->
-                clearFreeSession()
+            .setNeutralButton("Купить Premium") { _, _ -> createBridgeAndOpenBot() }
+            .setNegativeButton("Завершить") { _, _ ->
                 deleteUserFromServer { SagerNet.stopService() }
             }
             .setCancelable(false)
             .show()
-    }
-
-    private fun startNewFreeSession() {
-        val now = System.currentTimeMillis()
-        sessionPrefs.edit()
-            .putLong("deadline_at", now + FREE_SESSION_DURATION_MS)
-            .putLong("traffic_used_bytes", 0L)
-            .putLong("traffic_limit_bytes", FREE_TRAFFIC_LIMIT_BYTES)
-            .apply()
-        lastReportedTrafficBytes = 0L
-        trafficLimitReached = false
-        sessionEndReason = null
-    }
-
-    private fun clearFreeSession() {
-        sessionTimerJob?.cancel()
-        sessionPrefs.edit().clear().apply()
-        lastReportedTrafficBytes = 0L
-        trafficLimitReached = false
-        sessionEndReason = null
-    }
-
-    private fun handleFreeTrafficUpdate(stats: SpeedDisplayData) {
-        if (!DataStore.serviceState.connected || trafficLimitReached) return
-
-        val deadline = sessionPrefs.getLong("deadline_at", 0L)
-        if (deadline <= 0L) return
-
-        val totalBytes = (stats.txTotal + stats.rxTotal).coerceAtLeast(0L)
-        val deltaBytes = if (totalBytes >= lastReportedTrafficBytes) {
-            totalBytes - lastReportedTrafficBytes
-        } else {
-            // Счётчик Xray мог обнулиться после переподключения.
-            totalBytes
-        }
-        lastReportedTrafficBytes = totalBytes
-
-        if (deltaBytes > 0L) {
-            val used = sessionPrefs.getLong("traffic_used_bytes", 0L) + deltaBytes
-            sessionPrefs.edit().putLong("traffic_used_bytes", used).apply()
-        }
-
-        val usedBytes = sessionPrefs.getLong("traffic_used_bytes", 0L)
-        val trafficLimit = sessionPrefs.getLong("traffic_limit_bytes", FREE_TRAFFIC_LIMIT_BYTES)
-        val remainingTime = (deadline - System.currentTimeMillis()).coerceAtLeast(0L)
-        binding.stats.updateCloudNodeStatus(usedBytes, remainingTime)
-
-        if (usedBytes >= trafficLimit) {
-            trafficLimitReached = true
-            sessionEndReason = "traffic"
-            runOnUiThread {
-                SagerNet.stopService()
-                showTrafficLimitDialog()
-            }
-        }
-    }
-
-    private fun startSessionTimer() {
-        val deadline = sessionPrefs.getLong("deadline_at", 0L)
-        if (deadline <= 0L) return
-
-        sessionTimerJob?.cancel()
-        sessionTimerJob = MainScope().launch {
-            while (true) {
-                val remaining = deadline - System.currentTimeMillis()
-                if (remaining <= 0L) {
-                    sessionEndReason = "time"
-                    SagerNet.stopService()
-                    sessionTimerJob = null
-                    showSessionLimitDialog()
-                    break
-                }
-
-                if (DataStore.serviceState.connected) {
-                    val used = sessionPrefs.getLong("traffic_used_bytes", 0L)
-                    binding.stats.updateCloudNodeStatus(used, remaining)
-                }
-                delay(minOf(1000L, remaining))
-            }
-        }
     }
 
     // ===============================================================
@@ -819,20 +656,13 @@ class MainActivity : ThemedActivity(),
         if (state == BaseService.State.Connected) {
             checkPaidStatus { isPaid ->
                 if (isPaid) {
-                    clearFreeSession()
+                    sessionStatusJob?.cancel()
                 } else {
-                    val deadline = sessionPrefs.getLong("deadline_at", 0L)
-                    if (deadline > System.currentTimeMillis()) {
-                        startSessionTimer()
-                    } else {
-                        sessionEndReason = "no_session"
-                        SagerNet.stopService()
-                        snackbar("Для бесплатного подключения сначала получите доступ за рекламу.").show()
-                    }
+                    startSessionStatusPolling()
                 }
             }
-        } else if (sessionEndReason != "traffic") {
-            sessionTimerJob?.cancel()
+        } else if (state == BaseService.State.Idle || state == BaseService.State.Stopping) {
+            if (state == BaseService.State.Idle) sessionStatusJob?.cancel()
         }
 
         if (msg != null) snackbar(getString(R.string.vpn_error, msg)).show()
@@ -865,7 +695,6 @@ class MainActivity : ThemedActivity(),
 
     override fun cbSpeedUpdate(stats: SpeedDisplayData) {
         binding.stats.updateSpeed(stats.txRateProxy, stats.rxRateProxy)
-        handleFreeTrafficUpdate(stats)
     }
 
     override fun cbTrafficUpdate(data: TrafficData) {
@@ -904,6 +733,7 @@ class MainActivity : ThemedActivity(),
     }
 
     override fun onDestroy() {
+        sessionStatusJob?.cancel()
         super.onDestroy()
         GroupManager.userInterface = null
         DataStore.configurationStore.unregisterChangeListener(this)
