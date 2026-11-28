@@ -395,12 +395,14 @@ class MainActivity : ThemedActivity(),
                             lastSessionEndReason = reason
                             if (reason == "traffic" || reason == "time") {
                                 sessionEndHandled = true
-                                SagerNet.stopService()
+                                if (DataStore.serviceState.connected) SagerNet.stopService()
                                 if (reason == "traffic") showTrafficLimitDialog() else showSessionLimitDialog()
                             } else if (DataStore.serviceState.connected) {
                                 sessionEndHandled = true
                                 SagerNet.stopService()
                                 snackbar("Бесплатный доступ завершён. Нажмите кнопку подключения, чтобы проверить доступ.").show()
+                            } else {
+                                sessionStatusJob?.cancel()
                             }
                         }
                     }
@@ -662,8 +664,6 @@ class MainActivity : ThemedActivity(),
                     startSessionStatusPolling()
                 }
             }
-        } else if (state == BaseService.State.Idle || state == BaseService.State.Stopping) {
-            if (state == BaseService.State.Idle) sessionStatusJob?.cancel()
         }
 
         if (msg != null) snackbar(getString(R.string.vpn_error, msg)).show()
