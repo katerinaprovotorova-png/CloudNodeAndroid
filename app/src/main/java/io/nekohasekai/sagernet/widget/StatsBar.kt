@@ -122,12 +122,12 @@ class StatsBar @JvmOverloads constructor(
         }"
     }
 
-    fun updateCloudNodeStatus(usedBytes: Long, remainingMs: Long) {
+    fun updateCloudNodeStatus(usedBytes: Long, remainingBytes: Long, remainingMs: Long) {
         val totalSeconds = (remainingMs.coerceAtLeast(0L) / 1000L)
         val minutes = totalSeconds / 60L
         val seconds = totalSeconds % 60L
         setStatus(
-            "VPN · использовано ${Formatter.formatFileSize(context, usedBytes)} · осталось %02d:%02d".format(
+            "VPN · использовано ${Formatter.formatFileSize(context, usedBytes)} · трафик ${Formatter.formatFileSize(context, remainingBytes)} · время %02d:%02d".format(
                 minutes, seconds
             )
         )
