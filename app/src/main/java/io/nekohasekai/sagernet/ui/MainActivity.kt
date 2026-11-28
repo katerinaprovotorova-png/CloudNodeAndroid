@@ -89,6 +89,15 @@ class MainActivity : ThemedActivity(),
     private var rewardedAdLoader: RewardedAdLoader? = null
     private var rewardedAd: RewardedAd? = null
 
+    private val FREE_SESSION_DURATION_MS = 30 * 60 * 1000L
+    private val FREE_TRAFFIC_LIMIT_BYTES = 250L * 1024L * 1024L
+    private val sessionPrefs by lazy {
+        getSharedPreferences("cloudnode_free_session", MODE_PRIVATE)
+    }
+    private var lastReportedTrafficBytes = 0L
+    private var trafficLimitReached = false
+    private var sessionEndReason: String? = null
+
     // ✅ URL API через Nginx прокси (HTTPS 443)
     private val API_BASE_URL = "https://cloudnodes.ru/api"
     private val API_KEY = "SuperSecretKey123XYZ"
@@ -125,6 +134,7 @@ class MainActivity : ThemedActivity(),
         // ✅ Логика кнопки самолётика с проверкой платного статуса
         binding.fab.setOnClickListener {
             if (DataStore.serviceState.canStop) {
+                clearFreeSession()
                 deleteUserFromServer { SagerNet.stopService() }
             } else {
                 checkPaidStatus { isPaid ->
@@ -134,7 +144,10 @@ class MainActivity : ThemedActivity(),
                             connect.launch(null)
                         }
                     } else {
-                        showRewardedAd { fetchAndConnectTrial() }
+                        showRewardedAd {
+                            startNewFreeSession()
+                            fetchAndConnectTrial()
+                        }
                     }
                 }
             }
@@ -310,10 +323,10 @@ class MainActivity : ThemedActivity(),
         rewardedAdLoader?.loadAd(config)
     }
 
-    private fun showRewardedAd(afterAd: () -> Unit) {
+    private fun showRewardedAd(afterReward: () -> Unit) {
         val ad = rewardedAd
         if (ad == null) {
-            snackbar("Реклама ещё загружается. Попробуйте через несколько секунд.").show()
+            snackbar("Реклама ещё загружается. Доступ не начислен. Попробуйте через несколько секунд.").show()
             loadRewardedAd()
             return
         }
@@ -326,27 +339,29 @@ class MainActivity : ThemedActivity(),
             override fun onAdClicked() {}
             override fun onAdImpression(impressionData: ImpressionData?) {}
 
+            // SDK подтверждает награду. Само закрытие рекламы наградой не считается.
             override fun onRewarded(reward: Reward) {
                 rewardEarned = true
-                if (!actionCompleted) {
-                    actionCompleted = true
-                    afterAd()
-                }
             }
 
             override fun onAdFailedToShow(adError: AdError) {
                 ad.setAdEventListener(null)
                 rewardedAd = null
-                snackbar("Не удалось показать рекламу. Попробуйте позже.").show()
+                snackbar("Не удалось показать рекламу. Доступ не начислен. Попробуйте позже.").show()
                 loadRewardedAd()
             }
 
             override fun onAdDismissed() {
                 ad.setAdEventListener(null)
                 rewardedAd = null
-                if (!rewardEarned) {
-                    snackbar("Для получения доступа нужно досмотреть рекламу до награды.").show()
+
+                if (rewardEarned && !actionCompleted) {
+                    actionCompleted = true
+                    afterReward()
+                } else if (!rewardEarned) {
+                    snackbar("Награда не подтверждена. Доступ не начислен.").show()
                 }
+
                 loadRewardedAd()
             }
         })
@@ -487,35 +502,137 @@ class MainActivity : ThemedActivity(),
     // ================= ТАЙМЕР 1 ЧАС + РЕКЛАМА =================
 
     private fun showSessionLimitDialog() {
+        if (isFinishing || isDestroyed) return
         MaterialAlertDialogBuilder(this)
-            .setTitle("⏱ Бесплатный час истек")
-            .setMessage("Чтобы продолжить пользоваться VPN:\n\n🎬 Посмотри рекламу — получи ещё 1 час бесплатно\n\n💳 Или купи подписку от 99 ₽/мес в нашем Telegram-боте")
-            .setPositiveButton("🎬 Посмотреть рекламу (+1 час)") { _, _ ->
+            .setTitle("⏱ Бесплатные 30 минут истекли")
+            .setMessage("Чтобы продолжить пользоваться VPN, посмотрите рекламу и получите новые 30 минут и 250 МБ. Либо перейдите к покупке Premium.")
+            .setPositiveButton("🎬 Ещё 30 минут за рекламу") { _, _ ->
                 showRewardedAd {
-                    startSessionTimer()
-                    connect.launch(null)
-                    snackbar("✅ Время продлено! Подключаем...").show()
+                    startNewFreeSession()
+                    fetchAndConnectTrial()
                 }
             }
-            .setNeutralButton("💳 Купить подписку") { _, _ ->
-                showRewardedAd {
-                    createBridgeAndOpenBot()
-                }
+            .setNeutralButton("💳 Купить Premium") { _, _ ->
+                createBridgeAndOpenBot()
             }
-            .setNegativeButton("❌ Выйти и удалить данные") { _, _ ->
+            .setNegativeButton("❌ Завершить и удалить доступ") { _, _ ->
+                clearFreeSession()
                 deleteUserFromServer { SagerNet.stopService() }
             }
             .setCancelable(false)
             .show()
     }
 
+    private fun showTrafficLimitDialog() {
+        if (isFinishing || isDestroyed) return
+        MaterialAlertDialogBuilder(this)
+            .setTitle("📶 Пакет трафика израсходован")
+            .setMessage("VPN отключён. Посмотрите рекламу, чтобы получить ещё 250 МБ. Оставшееся время текущей сессии сохранится.")
+            .setPositiveButton("🎬 Получить ещё 250 МБ") { _, _ ->
+                showRewardedAd {
+                    val currentLimit = sessionPrefs.getLong("traffic_limit_bytes", FREE_TRAFFIC_LIMIT_BYTES)
+                    sessionPrefs.edit()
+                        .putLong("traffic_limit_bytes", currentLimit + FREE_TRAFFIC_LIMIT_BYTES)
+                        .apply()
+                    trafficLimitReached = false
+                    sessionEndReason = null
+                    lastReportedTrafficBytes = 0L
+
+                    if (sessionPrefs.getLong("deadline_at", 0L) > System.currentTimeMillis()) {
+                        snackbar("Награда подтверждена: добавлено 250 МБ. Подключаем...").show()
+                        connect.launch(null)
+                    } else {
+                        showSessionLimitDialog()
+                    }
+                }
+            }
+            .setNeutralButton("💳 Купить Premium") { _, _ ->
+                createBridgeAndOpenBot()
+            }
+            .setNegativeButton("❌ Завершить и удалить доступ") { _, _ ->
+                clearFreeSession()
+                deleteUserFromServer { SagerNet.stopService() }
+            }
+            .setCancelable(false)
+            .show()
+    }
+
+    private fun startNewFreeSession() {
+        val now = System.currentTimeMillis()
+        sessionPrefs.edit()
+            .putLong("deadline_at", now + FREE_SESSION_DURATION_MS)
+            .putLong("traffic_used_bytes", 0L)
+            .putLong("traffic_limit_bytes", FREE_TRAFFIC_LIMIT_BYTES)
+            .apply()
+        lastReportedTrafficBytes = 0L
+        trafficLimitReached = false
+        sessionEndReason = null
+    }
+
+    private fun clearFreeSession() {
+        sessionTimerJob?.cancel()
+        sessionPrefs.edit().clear().apply()
+        lastReportedTrafficBytes = 0L
+        trafficLimitReached = false
+        sessionEndReason = null
+    }
+
+    private fun handleFreeTrafficUpdate(stats: SpeedDisplayData) {
+        if (!DataStore.serviceState.connected || trafficLimitReached) return
+
+        val deadline = sessionPrefs.getLong("deadline_at", 0L)
+        if (deadline <= 0L) return
+
+        val totalBytes = (stats.txTotal + stats.rxTotal).coerceAtLeast(0L)
+        val deltaBytes = if (totalBytes >= lastReportedTrafficBytes) {
+            totalBytes - lastReportedTrafficBytes
+        } else {
+            // Счётчик Xray мог обнулиться после переподключения.
+            totalBytes
+        }
+        lastReportedTrafficBytes = totalBytes
+
+        if (deltaBytes > 0L) {
+            val used = sessionPrefs.getLong("traffic_used_bytes", 0L) + deltaBytes
+            sessionPrefs.edit().putLong("traffic_used_bytes", used).apply()
+        }
+
+        val usedBytes = sessionPrefs.getLong("traffic_used_bytes", 0L)
+        val trafficLimit = sessionPrefs.getLong("traffic_limit_bytes", FREE_TRAFFIC_LIMIT_BYTES)
+        val remainingTime = (deadline - System.currentTimeMillis()).coerceAtLeast(0L)
+        binding.stats.updateCloudNodeStatus(usedBytes, remainingTime)
+
+        if (usedBytes >= trafficLimit) {
+            trafficLimitReached = true
+            sessionEndReason = "traffic"
+            runOnUiThread {
+                SagerNet.stopService()
+                showTrafficLimitDialog()
+            }
+        }
+    }
+
     private fun startSessionTimer() {
+        val deadline = sessionPrefs.getLong("deadline_at", 0L)
+        if (deadline <= 0L) return
+
         sessionTimerJob?.cancel()
         sessionTimerJob = MainScope().launch {
-            delay(60 * 60 * 1000L)
-            if (DataStore.serviceState.canStop) {
-                SagerNet.stopService()
-                showSessionLimitDialog()
+            while (true) {
+                val remaining = deadline - System.currentTimeMillis()
+                if (remaining <= 0L) {
+                    sessionEndReason = "time"
+                    SagerNet.stopService()
+                    sessionTimerJob = null
+                    showSessionLimitDialog()
+                    break
+                }
+
+                if (DataStore.serviceState.connected) {
+                    val used = sessionPrefs.getLong("traffic_used_bytes", 0L)
+                    binding.stats.updateCloudNodeStatus(used, remaining)
+                }
+                delay(minOf(1000L, remaining))
             }
         }
     }
@@ -703,10 +820,17 @@ class MainActivity : ThemedActivity(),
         if (state == BaseService.State.Connected) {
             checkPaidStatus { isPaid ->
                 if (!isPaid) {
-                    startSessionTimer()
+                    val deadline = sessionPrefs.getLong("deadline_at", 0L)
+                    if (deadline > System.currentTimeMillis()) {
+                        startSessionTimer()
+                    } else {
+                        sessionEndReason = "no_session"
+                        SagerNet.stopService()
+                        snackbar("Для бесплатного подключения сначала получите доступ за рекламу.").show()
+                    }
                 }
             }
-        } else {
+        } else if (sessionEndReason != "traffic") {
             sessionTimerJob?.cancel()
         }
 
@@ -740,6 +864,7 @@ class MainActivity : ThemedActivity(),
 
     override fun cbSpeedUpdate(stats: SpeedDisplayData) {
         binding.stats.updateSpeed(stats.txRateProxy, stats.rxRateProxy)
+        handleFreeTrafficUpdate(stats)
     }
 
     override fun cbTrafficUpdate(data: TrafficData) {
