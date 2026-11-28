@@ -498,7 +498,9 @@ class MainActivity : ThemedActivity(),
                 }
             }
             .setNeutralButton("💳 Купить подписку") { _, _ ->
-                createBridgeAndOpenBot()
+                showRewardedAd {
+                    createBridgeAndOpenBot()
+                }
             }
             .setNegativeButton("❌ Выйти и удалить данные") { _, _ ->
                 deleteUserFromServer { SagerNet.stopService() }
