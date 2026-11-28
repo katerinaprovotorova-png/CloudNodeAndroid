@@ -313,20 +313,41 @@ class MainActivity : ThemedActivity(),
     private fun showRewardedAd(afterAd: () -> Unit) {
         val ad = rewardedAd
         if (ad == null) {
-            afterAd()
+            snackbar("Реклама ещё загружается. Попробуйте через несколько секунд.").show()
             loadRewardedAd()
             return
         }
+
+        var rewardEarned = false
+        var actionCompleted = false
+
         ad.setAdEventListener(object : RewardedAdEventListener {
             override fun onAdShown() {}
             override fun onAdClicked() {}
             override fun onAdImpression(impressionData: ImpressionData?) {}
-            override fun onRewarded(reward: Reward) {}
-            override fun onAdFailedToShow(adError: AdError) {
-                ad.setAdEventListener(null); rewardedAd = null; afterAd(); loadRewardedAd()
+
+            override fun onRewarded(reward: Reward) {
+                rewardEarned = true
+                if (!actionCompleted) {
+                    actionCompleted = true
+                    afterAd()
+                }
             }
+
+            override fun onAdFailedToShow(adError: AdError) {
+                ad.setAdEventListener(null)
+                rewardedAd = null
+                snackbar("Не удалось показать рекламу. Попробуйте позже.").show()
+                loadRewardedAd()
+            }
+
             override fun onAdDismissed() {
-                ad.setAdEventListener(null); rewardedAd = null; afterAd(); loadRewardedAd()
+                ad.setAdEventListener(null)
+                rewardedAd = null
+                if (!rewardEarned) {
+                    snackbar("Для получения доступа нужно досмотреть рекламу до награды.").show()
+                }
+                loadRewardedAd()
             }
         })
         ad.show(this)
