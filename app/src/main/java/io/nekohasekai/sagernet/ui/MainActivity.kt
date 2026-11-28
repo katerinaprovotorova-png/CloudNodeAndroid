@@ -89,6 +89,9 @@ class MainActivity : ThemedActivity(),
     private var sessionStatusJob: Job? = null
     private var sessionEndHandled = false
     private var lastSessionEndReason: String? = null
+    // Yandex rewarded-ad SDK objects.
+    private var rewardedAdLoader: RewardedAdLoader? = null
+    private var rewardedAd: RewardedAd? = null
 
     // Все лимиты, сроки и состояние бесплатной сессии находятся только на сервере.
     // ✅ Боевые ID рекламы
@@ -352,7 +355,7 @@ class MainActivity : ThemedActivity(),
         }
     }
 
-    private fun installProfileAndConnect(link: String) {
+    private suspend fun installProfileAndConnect(link: String) {
         val beans = parseProxies(link)
         if (beans.isEmpty()) throw Exception("Не удалось распарсить VPN-конфигурацию")
         val targetGroupId = DataStore.selectedGroup.takeIf { it > 0 } ?: 1L
