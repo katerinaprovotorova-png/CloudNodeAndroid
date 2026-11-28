@@ -122,6 +122,17 @@ class StatsBar @JvmOverloads constructor(
         }"
     }
 
+    fun updateCloudNodeStatus(usedBytes: Long, remainingMs: Long) {
+        val totalSeconds = (remainingMs.coerceAtLeast(0L) / 1000L)
+        val minutes = totalSeconds / 60L
+        val seconds = totalSeconds % 60L
+        setStatus(
+            "VPN · использовано ${Formatter.formatFileSize(context, usedBytes)} · осталось %02d:%02d".format(
+                minutes, seconds
+            )
+        )
+    }
+
     fun testConnection() {
         val activity = context as MainActivity
         isEnabled = false
