@@ -505,7 +505,7 @@ class MainActivity : ThemedActivity(),
         if (isFinishing || isDestroyed) return
         MaterialAlertDialogBuilder(this)
             .setTitle("⏱ Бесплатные 30 минут истекли")
-            .setMessage("Чтобы продолжить пользоваться VPN, посмотрите рекламу и получите новые 30 минут и 250 МБ. Либо перейдите к покупке Premium.")
+            .setMessage("Чтобы продолжить пользоваться VPN, посмотрите рекламу и получите новые 30 минут и дополнительный трафик. Либо перейдите к покупке Premium.")
             .setPositiveButton("🎬 Ещё 30 минут за рекламу") { _, _ ->
                 showRewardedAd {
                     startNewFreeSession()
@@ -528,7 +528,7 @@ class MainActivity : ThemedActivity(),
         MaterialAlertDialogBuilder(this)
             .setTitle("📶 Пакет трафика израсходован")
             .setMessage("VPN отключён. Посмотрите рекламу, чтобы получить ещё 250 МБ. Оставшееся время текущей сессии сохранится.")
-            .setPositiveButton("🎬 Получить ещё 250 МБ") { _, _ ->
+            .setPositiveButton("🎬 Получить дополнительный трафик") { _, _ ->
                 showRewardedAd {
                     val currentLimit = sessionPrefs.getLong("traffic_limit_bytes", FREE_TRAFFIC_LIMIT_BYTES)
                     sessionPrefs.edit()
@@ -539,7 +539,7 @@ class MainActivity : ThemedActivity(),
                     lastReportedTrafficBytes = 0L
 
                     if (sessionPrefs.getLong("deadline_at", 0L) > System.currentTimeMillis()) {
-                        snackbar("Награда подтверждена: добавлено 250 МБ. Подключаем...").show()
+                        snackbar("Награда подтверждена: дополнительный трафик начислен. Подключаем...").show()
                         connect.launch(null)
                     } else {
                         showSessionLimitDialog()
