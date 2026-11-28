@@ -217,12 +217,9 @@ class MainActivity : ThemedActivity(),
     // ================= ПРОВЕРКА ПЛАТНОГО СТАТУСА (БЕЗОПАСНАЯ) =================
     private fun checkPaidStatus(onResult: (Boolean) -> Unit) {
         lifecycleScope.launch(Dispatchers.IO) {
-            try {
+            val isPaid = try {
                 val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
                 val username = "tg_$deviceId"
-                
-                android.util.Log.d("CloudNode", "CHECK_PAID URL: $API_BASE_URL/check_paid?username=$username")
-
                 val client = OkHttpClient.Builder()
                     .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
                     .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
@@ -232,21 +229,23 @@ class MainActivity : ThemedActivity(),
                     .header("X-API-Key", API_KEY)
                     .get()
                     .build()
-                val resp = client.newCall(req).execute()
-                val body = resp.body?.string() ?: "{}"
-                
-                android.util.Log.d("CloudNode", "CHECK_PAID RESPONSE: $body")
 
-                if (resp.isSuccessful) {
-                    val json = JSONObject(body)
-                    onResult(json.optBoolean("is_paid", false))
-                } else {
-                    android.util.Log.e("CloudNode", "CHECK_PAID HTTP ERROR: ${resp.code}")
-                    onResult(false)
+                client.newCall(req).execute().use { response ->
+                    val body = response.body?.string() ?: "{}"
+                    if (response.isSuccessful) {
+                        JSONObject(body).optBoolean("is_paid", false)
+                    } else {
+                        android.util.Log.e("CloudNode", "CHECK_PAID HTTP ERROR: ${response.code}")
+                        false
+                    }
                 }
             } catch (e: Exception) {
                 android.util.Log.e("CloudNode", "CHECK_PAID EXCEPTION", e)
-                onResult(false)
+                false
+            }
+
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed) onResult(isPaid)
             }
         }
     }
@@ -819,7 +818,9 @@ class MainActivity : ThemedActivity(),
 
         if (state == BaseService.State.Connected) {
             checkPaidStatus { isPaid ->
-                if (!isPaid) {
+                if (isPaid) {
+                    clearFreeSession()
+                } else {
                     val deadline = sessionPrefs.getLong("deadline_at", 0L)
                     if (deadline > System.currentTimeMillis()) {
                         startSessionTimer()
