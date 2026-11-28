@@ -2,7 +2,7 @@ name: Build CloudNode APK
 
 on:
   push:
-    branches: [ "master", "main", "cloudnode-finish-20261128" ]
+    branches: [ "master", "main", "cloudnode-finish-20261128", "cloudnode-session-limits-20261128" ]
   workflow_dispatch:
 
 jobs:
