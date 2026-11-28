@@ -498,7 +498,7 @@ class MainActivity : ThemedActivity(),
         }
     }
 
-    // ================= ТАЙМЕР 1 ЧАС + РЕКЛАМА =================
+    // ================= БЕСПЛАТНАЯ СЕССИЯ: 30 МИНУТ / 250 МБ =================
 
     private fun showSessionLimitDialog() {
         if (isFinishing || isDestroyed) return
@@ -526,7 +526,7 @@ class MainActivity : ThemedActivity(),
         if (isFinishing || isDestroyed) return
         MaterialAlertDialogBuilder(this)
             .setTitle("📶 Пакет трафика израсходован")
-            .setMessage("VPN отключён. Посмотрите рекламу, чтобы получить ещё 250 МБ. Оставшееся время текущей сессии сохранится.")
+            .setMessage("VPN отключён. Посмотрите рекламу, чтобы получить дополнительный трафик. Оставшееся время текущей сессии сохранится.")
             .setPositiveButton("🎬 Получить дополнительный трафик") { _, _ ->
                 showRewardedAd {
                     val currentLimit = sessionPrefs.getLong("traffic_limit_bytes", FREE_TRAFFIC_LIMIT_BYTES)
